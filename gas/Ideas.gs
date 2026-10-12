@@ -10,8 +10,18 @@
 function openArticleDialog() {
   ensureSheet_(SpreadsheetApp.getActiveSpreadsheet(), APP.SHEETS.ARTICLES, ARTICLE_COLS);
   ensureIdeasSheet_();
-  const html = HtmlService.createHtmlOutputFromFile('ArticleDialog').setWidth(960).setHeight(720);
+  const html = HtmlService.createHtmlOutput(articleDialogHtml_()).setWidth(960).setHeight(720);
   SpreadsheetApp.getUi().showModalDialog(html, 'GASから記事を作る');
+}
+
+/** 画面のHTML。1ファイル版（dist/コード.gs）には埋め込み済みなので、HTMLファイルを別に作らなくてよい */
+function articleDialogHtml_() {
+  if (typeof ARTICLE_DIALOG_HTML !== 'undefined') return ARTICLE_DIALOG_HTML;
+  try {
+    return HtmlService.createHtmlOutputFromFile('ArticleDialog').getContent();
+  } catch (e) {
+    throw new Error('記事作成画面のHTMLが見つかりません。最新の「コード.gs」（1ファイル版）に入れ替えてください。');
+  }
 }
 
 /** 画面を開いたとき：ネタ帳で行を選んでいれば、その内容を入れた状態で始める */
