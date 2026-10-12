@@ -129,3 +129,10 @@ test('noteのプロフィールURLをRSSのURLに直す', () => {
   assert.strictEqual(resolveNoteRssUrl_('https://note.com/nice_macaw6/rss'), 'https://note.com/nice_macaw6/rss');
   assert.strictEqual(resolveNoteRssUrl_('https://note.com/nice_macaw6?tab=x'), 'https://note.com/nice_macaw6/rss');
 });
+
+test('送信前チェック：マイナンバー・口座番号・郵便番号・住所も見つける', () => {
+  const code = "const memo = '普通 1234567 / 〒190-0012 東京都立川市曙町 / 番号 123456789012';";
+  const labels = findSensitive_(code).map(f => f.label);
+  ['口座番号', '郵便番号', '住所', 'マイナンバー・法人番号らしき数字'].forEach(l => assert.ok(labels.includes(l), l + ': ' + labels.join(',')));
+  assert.strictEqual(findSensitive_("const d = new Date(1700000000000.5); const zip = '123-4567'; const pref = '〇〇県〇〇市';").length, 0);
+});

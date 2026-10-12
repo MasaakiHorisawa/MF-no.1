@@ -274,7 +274,7 @@ function promptApiKey() {
   const res = ui.prompt(
     'Claude APIキーの設定',
     'Anthropic Console で発行したAPIキー（sk-ant- で始まる文字列）を貼り付けてください。\n' +
-    'キーはこのスクリプトのプロパティに保存され、シートには表示されません。',
+    'キーはあなた本人だけが読める場所に保存され、シートや共同編集者には表示されません。',
     ui.ButtonSet.OK_CANCEL
   );
   if (res.getSelectedButton() !== ui.Button.OK) return;
@@ -283,8 +283,27 @@ function promptApiKey() {
     ui.alert('APIキーの形式が正しくないようです。sk-ant- で始まる文字列を貼り付けてください。');
     return;
   }
-  PropertiesService.getScriptProperties().setProperty(APP.PROP_API_KEY, key);
+  PropertiesService.getUserProperties().setProperty(APP.PROP_API_KEY, key);
+  PropertiesService.getScriptProperties().deleteProperty(APP.PROP_API_KEY); // 旧版の保存場所に残っていれば消す
   ui.alert('APIキーを保存しました。');
+}
+
+/**
+ * APIキーを読む。キーは実行ユーザー本人だけが読める場所（ユーザープロパティ）に保存する。
+ * スクリプトプロパティはスプレッドシートの編集者なら誰でも見られるため使わない（旧版で保存されていれば移す）
+ */
+function getApiKey_() {
+  const userProps = PropertiesService.getUserProperties();
+  let key = userProps.getProperty(APP.PROP_API_KEY);
+  if (!key) {
+    const scriptProps = PropertiesService.getScriptProperties();
+    key = scriptProps.getProperty(APP.PROP_API_KEY);
+    if (key) {
+      userProps.setProperty(APP.PROP_API_KEY, key);
+      scriptProps.deleteProperty(APP.PROP_API_KEY);
+    }
+  }
+  return key;
 }
 
 /**
@@ -293,7 +312,7 @@ function promptApiKey() {
  * @return {Object} schema に沿ってパースした結果
  */
 function callClaudeJson_(opts) {
-  const apiKey = PropertiesService.getScriptProperties().getProperty(APP.PROP_API_KEY);
+  const apiKey = getApiKey_();
   if (!apiKey) throw new Error('APIキーが未設定です。メニュー「APIキーを設定」から登録してください。');
 
   const request = buildClaudeRequest_(opts, apiKey);
@@ -724,6 +743,10 @@ const SENSITIVE_PATTERNS = [
   { label: 'GoogleドライブのURL', re: /https:\/\/(docs|drive)\.google\.com\/[^\s'"`)]*\/(d|folders)\/[A-Za-z0-9_-]{20,}/g },
   { label: 'ファイル・フォルダIDらしき文字列', re: /['"`][A-Za-z0-9_-]{25,}['"`]/g },
   { label: '電話番号', re: /0\d{1,4}-\d{1,4}-\d{3,4}/g, allow: /^0{2,}|0000|1234-5678/ },
+  { label: 'マイナンバー・法人番号らしき数字', re: /(?<![\d.])\d{12,13}(?![\d.])/g },
+  { label: '口座番号', re: /(普通|当座|口座(番号)?)\s*[:：]?\s*\d{7}/g },
+  { label: '郵便番号', re: /〒\s*\d{3}-?\d{4}|(?<![\d-])\d{3}-\d{4}(?![\d-])/g, allow: /000-0000|123-4567/ },
+  { label: '住所', re: /(北海道|東京都|京都府|大阪府|[^\s'"`、。]{2,3}県)[^\s'"`、。]{1,8}?[市区町村郡]/g, allow: /サンプル|テスト|〇〇|○○|例/ },
   { label: '法人名', re: /(株式会社|有限会社|合同会社|税理士法人|医療法人|社会福祉法人)[^\s'"`、。,）)]{1,12}|[^\s'"`、。,（(]{1,12}(株式会社|有限会社|合同会社|税理士法人|医療法人)/g, allow: /サンプル|テスト|〇〇|○○|ＡＢＣ|ABC|XYZ|例|架空|ダミー/ },
 ];
 
@@ -998,7 +1021,7 @@ function openArticleDialog() {
 /** 画面を開いたとき：ネタ帳で行を選んでいれば、その内容を入れた状態で始める */
 function articleDialogInit() {
   const settings = getSettings_();
-  const result = { types: ARTICLE_TYPES, prefill: null, hasApiKey: !!PropertiesService.getScriptProperties().getProperty(APP.PROP_API_KEY) };
+  const result = { types: ARTICLE_TYPES, prefill: null, hasApiKey: !!getApiKey_() };
   const sheet = SpreadsheetApp.getActiveSheet();
   if (sheet.getName() !== APP.SHEETS.IDEAS) return result;
   const rows = selectedDataRows_(sheet);

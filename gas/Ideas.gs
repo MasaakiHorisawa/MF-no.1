@@ -17,7 +17,7 @@ function openArticleDialog() {
 /** 画面を開いたとき：ネタ帳で行を選んでいれば、その内容を入れた状態で始める */
 function articleDialogInit() {
   const settings = getSettings_();
-  const result = { types: ARTICLE_TYPES, prefill: null, hasApiKey: !!PropertiesService.getScriptProperties().getProperty(APP.PROP_API_KEY) };
+  const result = { types: ARTICLE_TYPES, prefill: null, hasApiKey: !!getApiKey_() };
   const sheet = SpreadsheetApp.getActiveSheet();
   if (sheet.getName() !== APP.SHEETS.IDEAS) return result;
   const rows = selectedDataRows_(sheet);

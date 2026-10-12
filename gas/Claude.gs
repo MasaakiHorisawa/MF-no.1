@@ -11,7 +11,7 @@ function promptApiKey() {
   const res = ui.prompt(
     'Claude APIキーの設定',
     'Anthropic Console で発行したAPIキー（sk-ant- で始まる文字列）を貼り付けてください。\n' +
-    'キーはこのスクリプトのプロパティに保存され、シートには表示されません。',
+    'キーはあなた本人だけが読める場所に保存され、シートや共同編集者には表示されません。',
     ui.ButtonSet.OK_CANCEL
   );
   if (res.getSelectedButton() !== ui.Button.OK) return;
@@ -20,8 +20,27 @@ function promptApiKey() {
     ui.alert('APIキーの形式が正しくないようです。sk-ant- で始まる文字列を貼り付けてください。');
     return;
   }
-  PropertiesService.getScriptProperties().setProperty(APP.PROP_API_KEY, key);
+  PropertiesService.getUserProperties().setProperty(APP.PROP_API_KEY, key);
+  PropertiesService.getScriptProperties().deleteProperty(APP.PROP_API_KEY); // 旧版の保存場所に残っていれば消す
   ui.alert('APIキーを保存しました。');
+}
+
+/**
+ * APIキーを読む。キーは実行ユーザー本人だけが読める場所（ユーザープロパティ）に保存する。
+ * スクリプトプロパティはスプレッドシートの編集者なら誰でも見られるため使わない（旧版で保存されていれば移す）
+ */
+function getApiKey_() {
+  const userProps = PropertiesService.getUserProperties();
+  let key = userProps.getProperty(APP.PROP_API_KEY);
+  if (!key) {
+    const scriptProps = PropertiesService.getScriptProperties();
+    key = scriptProps.getProperty(APP.PROP_API_KEY);
+    if (key) {
+      userProps.setProperty(APP.PROP_API_KEY, key);
+      scriptProps.deleteProperty(APP.PROP_API_KEY);
+    }
+  }
+  return key;
 }
 
 /**
@@ -30,7 +49,7 @@ function promptApiKey() {
  * @return {Object} schema に沿ってパースした結果
  */
 function callClaudeJson_(opts) {
-  const apiKey = PropertiesService.getScriptProperties().getProperty(APP.PROP_API_KEY);
+  const apiKey = getApiKey_();
   if (!apiKey) throw new Error('APIキーが未設定です。メニュー「APIキーを設定」から登録してください。');
 
   const request = buildClaudeRequest_(opts, apiKey);
