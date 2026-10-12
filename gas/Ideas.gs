@@ -150,14 +150,13 @@ function registerDraftArticle_(meta, freeMarkdown, docUrl) {
   const articles = getSheetOrThrow_(APP.SHEETS.ARTICLES);
   const cols = requireColumns_(articles, ARTICLE_COLS);
   const id = nextArticleId_(articles);
-  const width = Math.max(...Object.values(cols)) + 1;
-  const row = new Array(width).fill('');
-  row[cols['記事ID']] = id;
-  row[cols['タイトル']] = meta.title;
-  row[cols['種別']] = meta.type;
-  row[cols['価格']] = meta.price;
-  row[cols['本文・要点']] = freeMarkdown;
-  row[cols['メモ']] = `下書き：${docUrl}`;
-  articles.getRange(articles.getLastRow() + 1, 1, 1, width).setValues([row]);
+  appendRowByName_(articles, cols, {
+    '記事ID': id,
+    'タイトル': meta.title,
+    '種別': meta.type,
+    '価格': meta.price,
+    '本文・要点': freeMarkdown,
+    'メモ': `下書き：${docUrl}`,
+  });
   return id;
 }

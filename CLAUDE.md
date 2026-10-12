@@ -11,6 +11,7 @@ note（GASツール販売）と X 発信の運用リポジトリ。発信者は�
 ## 構成
 - `gas/`：note×X 投稿管理ツール（GAS, V8）。ネタ帳（過去のGAS→記事下書き）、noteのRSS取り込み、X投稿案の作成とチェック。`node tests/run-tests.js` で純粋関数をテスト（追加のテストは `tests/*.test.js`）
 - GAS の UrlFetchApp は1回約60秒で打ち切られる。Claude への長い生成は分割して呼ぶ
+- 利用者は `dist/`（1ファイル版）を貼る。`gas/` を変更したら `node tools/bundle.js` で `dist/` を作り直してコミットする
 - `articles/published/`：公開済み記事（無料エリアのみ、先頭に front matter）
 - `articles/drafts/`：下書き
 - `docs/x-operations.md`：X 運用方針

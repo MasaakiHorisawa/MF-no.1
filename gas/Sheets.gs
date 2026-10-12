@@ -134,6 +134,20 @@ function selectedDataRows_(sheet) {
   return Array.from(rows).sort((a, b) => a - b);
 }
 
+/** {列名: 値} から、シートの列の並びどおりの1行分の配列を作る（列は requireColumns_ で確認済みの前提） */
+function buildRowByName_(cols, values) {
+  const row = new Array(Math.max(...Object.values(cols)) + 1).fill('');
+  Object.keys(values).forEach(name => { row[cols[name]] = values[name]; });
+  return row;
+}
+
+/** シートの末尾に1行追加し、その行番号を返す */
+function appendRowByName_(sheet, cols, values) {
+  const row = buildRowByName_(cols, values);
+  sheet.getRange(sheet.getLastRow() + 1, 1, 1, row.length).setValues([row]);
+  return sheet.getLastRow();
+}
+
 /** 記事IDを「A1, A2, …」の連番で振る（行を消しても重複しないよう、既存の最大値＋1にする） */
 function nextArticleId_(articles) {
   const col = requireColumns_(articles, ['記事ID'])['記事ID'];

@@ -58,16 +58,16 @@ function importNoteArticles_(settings) {
       return;
     }
 
-    const newRow = new Array(width).fill('');
-    newRow[cols['記事ID']] = nextArticleId_(articles);
-    newRow[cols['タイトル']] = item.title;
-    newRow[cols['URL']] = item.url;
-    newRow[cols['公開日']] = item.date;
-    newRow[cols['本文・要点']] = item.summary;
-    newRow[cols['メモ']] = 'RSSから自動取り込み（本文・要点は記事の冒頭のみ。必要なら無料部分を貼り足す）';
-    articles.getRange(articles.getLastRow() + 1, 1, 1, width).setValues([newRow]);
+    const row = appendRowByName_(articles, cols, {
+      '記事ID': nextArticleId_(articles),
+      'タイトル': item.title,
+      'URL': item.url,
+      '公開日': item.date,
+      '本文・要点': item.summary,
+      'メモ': 'RSSから自動取り込み（本文・要点は記事の冒頭のみ。必要なら無料部分を貼り足す）',
+    });
     result.added.push(item.title);
-    touchedRows.push(articles.getLastRow());
+    touchedRows.push(row);
   });
 
   // 取り込んだ記事のX投稿案もまとめて作る（「設定」で「しない」にすれば止まる）

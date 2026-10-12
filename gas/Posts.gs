@@ -83,20 +83,19 @@ function buildPostRow_(post, article, index, settings, pCols) {
   const link = post.include_link && article.url ? article.url : '';
   const check = checkPost_(post.text, link, settings['NGワード']);
   const stamp = Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyMMddHHmmss');
-  const width = Math.max(...Object.values(pCols)) + 1;
-  const row = new Array(width).fill('');
-  row[pCols['投稿ID']] = `P${stamp}-${index + 1}`;
-  row[pCols['記事ID']] = article.id;
-  row[pCols['柱']] = post.pillar;
-  row[pCols['型']] = post.post_type;
-  row[pCols['本文']] = post.text;
-  row[pCols['リンク']] = link;
-  row[pCols['文字数(X換算)']] = check.weight;
-  row[pCols['チェック']] = check.result;
-  row[pCols['ステータス']] = '案';
-  row[pCols['メモ']] = post.intent;
-  row[pCols['作成日時']] = formatNow_();
-  return row;
+  return buildRowByName_(pCols, {
+    '投稿ID': `P${stamp}-${index + 1}`,
+    '記事ID': article.id,
+    '柱': post.pillar,
+    '型': post.post_type,
+    '本文': post.text,
+    'リンク': link,
+    '文字数(X換算)': check.weight,
+    'チェック': check.result,
+    'ステータス': '案',
+    'メモ': post.intent,
+    '作成日時': formatNow_(),
+  });
 }
 
 /** 「X投稿」シートで選択した行の文字数・チェックを計算し直す */
