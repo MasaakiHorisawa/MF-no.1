@@ -7,7 +7,7 @@ function onOpen() {
     .addItem('① 初期設定（シート作成）', 'setupSheets')
     .addItem('② APIキーを設定', 'promptApiKey')
     .addSeparator()
-    .addItem('ネタ帳：選択したコードから記事の下書きを作成', 'generateArticleFromIdea')
+    .addItem('GASから記事を作る（分析・価格診断・下書き）', 'openArticleDialog')
     .addItem('noteの新着記事を取り込む', 'importNoteArticles')
     .addSeparator()
     .addItem('記事：選択した記事からX投稿案を作成', 'generatePostsFromSelection')

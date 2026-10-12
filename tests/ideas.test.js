@@ -50,17 +50,44 @@ test('Markdown を Google ドキュメント取り込み用の HTML にする', 
   assert.match(html, /<b>太字<\/b>と<code>code<\/code>/);
 });
 
-test('記事の構成スキーマと下書きの組み立て', () => {
-  const schema = buildArticlePlanSchema_();
-  assert.strictEqual(schema.additionalProperties, false);
-  assert.strictEqual(schema.required.length, Object.keys(schema.properties).length);
-  const plan = { title: '出納帳の翌月シートを自動作成', title_alternatives: ['案2'], price_suggestion: '1,480円', price_reason: '理由' };
-  const md = assembleDraftMarkdown_(plan, '無料の本文', '【ここに完全版コードを貼る】');
-  assert.match(md, /価格案：1,480円/);
-  assert.match(md, /# 出納帳の翌月シートを自動作成\n\n無料の本文\n\n---\n\n## ▼▼▼ ここから有料エリア ▼▼▼\n\n【ここに完全版コードを貼る】/);
+test('分析スキーマ：すべての object が構造化出力の条件を満たす', () => {
+  const walk = (node, path) => {
+    if (node.type === 'object') {
+      assert.strictEqual(node.additionalProperties, false, path);
+      assert.strictEqual(JSON.stringify(node.required.slice().sort()), JSON.stringify(Object.keys(node.properties).sort()), path);
+      Object.keys(node.properties).forEach(k => walk(node.properties[k], path + '.' + k));
+    } else if (node.type === 'array') {
+      walk(node.items, path + '[]');
+    }
+  };
+  const schema = buildArticleAnalyzeSchema_();
+  walk(schema, 'root');
+  assert.strictEqual(schema.properties.price.properties.recommended.type, 'integer');
+  assert.strictEqual(JSON.stringify(schema.properties.recommended_type.enum), JSON.stringify(ARTICLE_TYPES));
+  walk(buildMarkdownSchema_(), 'markdown');
 });
 
-test('記事用プロンプトにコード・メモ・お手本・守ることが入る', () => {
+test('下書きの組み立て：有料は有料エリアと価格、無料は有料エリアなし', () => {
+  const paid = assembleDraftMarkdown_({ title: '出納帳の翌月シート', titleAlternatives: ['案2'], type: '有料', price: 1980 }, '無料の本文', '【ここに完全版コードを貼る】');
+  assert.match(paid, /種別：有料 ／ 価格：1,980円/);
+  assert.match(paid, /タイトル案：出納帳の翌月シート ／ 案2/);
+  assert.match(paid, /# 出納帳の翌月シート\n\n無料の本文\n\n---\n\n## ▼▼▼ ここから有料エリア ▼▼▼\n\n【ここに完全版コードを貼る】/);
+  const free = assembleDraftMarkdown_({ title: 'T', type: '無料', price: '' }, '本文', '');
+  assert.match(free, /種別：無料\n/);
+  assert.doesNotMatch(free, /有料エリア|価格/);
+});
+
+test('価格の入力ゆれを数値にし、円表記にする', () => {
+  assert.strictEqual(normalizePrice_('1,980円'), 1980);
+  assert.strictEqual(normalizePrice_('１９８０'), 1980);
+  assert.strictEqual(normalizePrice_(2980), 2980);
+  assert.strictEqual(normalizePrice_(''), '');
+  assert.strictEqual(normalizePrice_('未定'), '');
+  assert.strictEqual(formatYen_(12800), '12,800円');
+  assert.strictEqual(formatYen_(''), '未定');
+});
+
+test('記事用プロンプト：イメージ・種別・価格・コード・価格の目安が入る', () => {
   const settings = {};
   DEFAULT_SETTINGS.forEach(([k, v]) => { settings[k] = v; });
   assert.doesNotMatch(buildArticleSystemPrompt_(settings), /文体のお手本/);
@@ -69,10 +96,19 @@ test('記事用プロンプトにコード・メモ・お手本・守ること�
   assert.match(system, /お手本の本文/);
   assert.match(system, /【要確認：〇〇】/);
   assert.match(system, /税理士ではない/);
-  const idea = { memo: '出納帳の翌月準備', code: 'function createNextMonthSheet() {}' };
-  assert.match(buildArticlePlanPrompt_(idea), /出納帳の翌月準備[\s\S]*```javascript\nfunction createNextMonthSheet\(\) \{\}\n```/);
-  assert.match(buildArticleFreePrompt_(idea, { title: 'T' }), /そのまま抜き出す[\s\S]*"title": "T"/);
-  assert.match(buildArticlePaidPrompt_(idea, { title: 'T' }), /【ここに完全版コードを貼る】/);
+  assert.match(system, /1,480〜1,980円/);
+
+  const idea = { image: '経理担当向けに導入手順を丁寧に', code: 'function createNextMonthSheet() {}', type: 'おまかせ', price: '' };
+  const analyze = buildArticleAnalyzePrompt_(idea);
+  assert.match(analyze, /おまかせ（提案してほしい）/);
+  assert.match(analyze, /未定（提案してほしい）/);
+  assert.match(analyze, /経理担当向けに導入手順を丁寧に[\s\S]*```javascript\nfunction createNextMonthSheet\(\) \{\}\n```/);
+  assert.match(buildArticleAnalyzePrompt_(Object.assign({}, idea, { type: '有料', price: 1980 })), /記事の種別：有料[\s\S]*1980円で考えている（妥当か評価してほしい）/);
+
+  assert.match(buildArticleFreePrompt_(idea, { title: 'T' }, '無料'), /無料のnote記事の本文[\s\S]*【ここにコード全文を貼る】/);
+  assert.match(buildArticleFreePrompt_(idea, { title: 'T' }, '有料（無料コードあり）'), /「無料エリア」[\s\S]*free_scope の部分をそのまま抜き出す[\s\S]*## ここから先は有料/);
+  assert.match(buildArticleFreePrompt_(idea, { title: 'T' }, '有料'), /冒頭の数行だけ/);
+  assert.match(buildArticlePaidPrompt_(idea, { title: 'T' }), /【ここに完全版コードを貼る】[\s\S]*"title": "T"/);
 });
 
 test('RSS の本文冒頭をテキストにし、URLとタイトルの表記ゆれを吸収する', () => {

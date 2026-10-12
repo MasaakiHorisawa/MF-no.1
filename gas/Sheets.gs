@@ -31,21 +31,30 @@ function setupSheets() {
     .setNumberFormat('yyyy/mm/dd hh:mm');
   posts.getRange(2, cols['本文'] + 1, posts.getMaxRows() - 1, 1).setWrap(true);
 
-  const ideas = ensureSheet_(ss, APP.SHEETS.IDEAS, IDEA_COLS);
-  setListValidation_(ideas, 'ステータス', IDEA_STATUSES);
-  setColumnWidthByName_(ideas, 'ひとこと', 240);
-  setColumnWidthByName_(ideas, 'コード', 360);
-  setColumnWidthByName_(ideas, 'チェック', 280);
-  // コードは折り返さず、1行の高さのまま表示する
-  const ideaCols = headerMap_(ideas);
-  ideas.getRange(2, ideaCols['コード'] + 1, ideas.getMaxRows() - 1, 1)
-    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP).setVerticalAlignment('top');
+  ensureIdeasSheet_(ss);
 
   SpreadsheetApp.getUi().alert(
     '初期設定が完了しました。\n' +
     '1. メニュー「APIキーを設定」を実行してください。\n' +
     '2. 「設定」シートの「noteのRSS」に https://note.com/あなたのID/rss を入れると、公開済み記事を自動で取り込めます。'
   );
+}
+
+/** 「ネタ帳」シートを用意する（記事作成画面からも呼ぶので、初期設定を忘れていても作られる） */
+function ensureIdeasSheet_(ss) {
+  const ideas = ensureSheet_(ss || SpreadsheetApp.getActiveSpreadsheet(), APP.SHEETS.IDEAS, IDEA_COLS);
+  setListValidation_(ideas, '種別', ARTICLE_TYPES);
+  setListValidation_(ideas, 'ステータス', IDEA_STATUSES);
+  setColumnWidthByName_(ideas, '記事のイメージ', 240);
+  setColumnWidthByName_(ideas, 'コード', 300);
+  setColumnWidthByName_(ideas, 'チェック', 260);
+  // コードと分析結果は長いので、折り返さず1行の高さのまま表示する
+  const cols = headerMap_(ideas);
+  ['コード', '分析結果'].forEach(name => {
+    ideas.getRange(2, cols[name] + 1, ideas.getMaxRows() - 1, 1)
+      .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP).setVerticalAlignment('top');
+  });
+  return ideas;
 }
 
 /** シートがなければ作成し、1行目に見出しを入れる。既存シートは足りない列だけ右端に追加する */
