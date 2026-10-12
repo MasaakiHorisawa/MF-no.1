@@ -22,55 +22,60 @@ function generatePostsFromSelection() {
   }
 
   const settings = getSettings_();
-  const count = Math.min(Math.max(parseInt(settings['1記事あたりの案数'], 10) || 3, 1), 5);
-  const aCols = requireColumns_(articles, ARTICLE_COLS);
-  const posts = getSheetOrThrow_(APP.SHEETS.POSTS);
-  const pCols = requireColumns_(posts, POST_COLS);
-
   const errors = [];
   let created = 0;
   rows.forEach(row => {
-    const values = articles.getRange(row, 1, 1, articles.getLastColumn()).getValues()[0];
-    const article = {
-      id: String(values[aCols['記事ID']] || '').trim(),
-      title: String(values[aCols['タイトル']] || '').trim(),
-      url: String(values[aCols['URL']] || '').trim(),
-      type: String(values[aCols['種別']] || '').trim(),
-      price: String(values[aCols['価格']] || '').trim(),
-      body: String(values[aCols['本文・要点']] || '').trim(),
-    };
-    if (!article.title || !article.body) {
-      errors.push(`${row}行目：タイトルと「本文・要点」を入力してください`);
-      return;
-    }
-    if (!article.id) {
-      article.id = `A${row - 1}`;
-      articles.getRange(row, aCols['記事ID'] + 1).setValue(article.id);
-    }
-
-    ss.toast(`「${article.title}」の投稿案を作成中…`, 'X投稿案', 60);
     try {
-      const result = callClaudeJson_({
-        model: settings['モデル'],
-        effort: settings['effort'],
-        system: buildSystemPrompt_(settings),
-        user: buildUserPrompt_(article, count),
-        schema: buildPostsSchema_(),
-      });
-      const newRows = (result.posts || []).map((p, i) => buildPostRow_(p, article, i, settings, pCols));
-      if (newRows.length) {
-        posts.getRange(posts.getLastRow() + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
-        created += newRows.length;
-      }
-      articles.getRange(row, aCols['投稿案作成日時'] + 1).setValue(formatNow_());
+      ss.toast(`${row}行目の記事の投稿案を作成中…`, 'X投稿案', 60);
+      created += generatePostsForArticleRow_(articles, row, settings);
     } catch (e) {
-      errors.push(`${row}行目「${article.title}」：${e.message}`);
+      errors.push(`${row}行目：${e.message}`);
     }
   });
 
   const message = [`${created}件の投稿案を「${APP.SHEETS.POSTS}」シートに追加しました。`];
   if (errors.length) message.push('', '次の記事は作成できませんでした：', ...errors);
   ui.alert(message.join('\n'));
+}
+
+/**
+ * 「記事」シートの1行から投稿案を作り、「X投稿」シートに追加する（メニューと毎朝の自動処理で共用）
+ * @return {number} 追加した件数
+ */
+function generatePostsForArticleRow_(articles, row, settings) {
+  const aCols = requireColumns_(articles, ARTICLE_COLS);
+  const posts = getSheetOrThrow_(APP.SHEETS.POSTS);
+  const pCols = requireColumns_(posts, POST_COLS);
+  const count = Math.min(Math.max(parseInt(settings['1記事あたりの案数'], 10) || 3, 1), 5);
+
+  const values = articles.getRange(row, 1, 1, articles.getLastColumn()).getValues()[0];
+  const article = {
+    id: String(values[aCols['記事ID']] || '').trim(),
+    title: String(values[aCols['タイトル']] || '').trim(),
+    url: String(values[aCols['URL']] || '').trim(),
+    type: String(values[aCols['種別']] || '').trim(),
+    price: String(values[aCols['価格']] || '').trim(),
+    body: String(values[aCols['本文・要点']] || '').trim(),
+  };
+  if (!article.title || !article.body) throw new Error('タイトルと「本文・要点」を入力してください');
+  if (!article.id) {
+    article.id = nextArticleId_(articles);
+    articles.getRange(row, aCols['記事ID'] + 1).setValue(article.id);
+  }
+
+  const result = callClaudeJson_({
+    model: settings['モデル'],
+    effort: settings['effort'],
+    system: buildSystemPrompt_(settings),
+    user: buildUserPrompt_(article, count),
+    schema: buildPostsSchema_(),
+  });
+  const newRows = (result.posts || []).map((p, i) => buildPostRow_(p, article, i, settings, pCols));
+  if (newRows.length) {
+    posts.getRange(posts.getLastRow() + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
+  }
+  articles.getRange(row, aCols['投稿案作成日時'] + 1).setValue(formatNow_());
+  return newRows.length;
 }
 
 /** Claude の回答1件を「X投稿」シートの1行に変換する */

@@ -31,7 +31,21 @@ function setupSheets() {
     .setNumberFormat('yyyy/mm/dd hh:mm');
   posts.getRange(2, cols['本文'] + 1, posts.getMaxRows() - 1, 1).setWrap(true);
 
-  SpreadsheetApp.getUi().alert('初期設定が完了しました。次にメニュー「APIキーを設定」を実行してください。');
+  const ideas = ensureSheet_(ss, APP.SHEETS.IDEAS, IDEA_COLS);
+  setListValidation_(ideas, 'ステータス', IDEA_STATUSES);
+  setColumnWidthByName_(ideas, 'ひとこと', 240);
+  setColumnWidthByName_(ideas, 'コード', 360);
+  setColumnWidthByName_(ideas, 'チェック', 280);
+  // コードは折り返さず、1行の高さのまま表示する
+  const ideaCols = headerMap_(ideas);
+  ideas.getRange(2, ideaCols['コード'] + 1, ideas.getMaxRows() - 1, 1)
+    .setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP).setVerticalAlignment('top');
+
+  SpreadsheetApp.getUi().alert(
+    '初期設定が完了しました。\n' +
+    '1. メニュー「APIキーを設定」を実行してください。\n' +
+    '2. 「設定」シートの「noteのRSS」に https://note.com/あなたのID/rss を入れると、公開済み記事を自動で取り込めます。'
+  );
 }
 
 /** シートがなければ作成し、1行目に見出しを入れる。既存シートは足りない列だけ右端に追加する */
@@ -109,6 +123,19 @@ function selectedDataRows_(sheet) {
     for (let row = Math.max(r.getRow(), 2); row <= end; row++) rows.add(row);
   });
   return Array.from(rows).sort((a, b) => a - b);
+}
+
+/** 記事IDを「A1, A2, …」の連番で振る（行を消しても重複しないよう、既存の最大値＋1にする） */
+function nextArticleId_(articles) {
+  const col = requireColumns_(articles, ['記事ID'])['記事ID'];
+  let max = 0;
+  if (articles.getLastRow() > 1) {
+    articles.getRange(2, col + 1, articles.getLastRow() - 1, 1).getValues().forEach(([id]) => {
+      const m = String(id).match(/^A(\d+)$/);
+      if (m) max = Math.max(max, Number(m[1]));
+    });
+  }
+  return `A${max + 1}`;
 }
 
 function formatNow_() {

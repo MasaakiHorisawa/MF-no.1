@@ -73,7 +73,16 @@ function buildClaudeRequest_(opts, apiKey) {
 function fetchWithRetry_(request) {
   const maxAttempts = 3;
   for (let attempt = 1; ; attempt++) {
-    const response = UrlFetchApp.fetch(request.url, request);
+    let response;
+    try {
+      response = UrlFetchApp.fetch(request.url, request);
+    } catch (e) {
+      // GAS の通信は約60秒で打ち切られる。再試行しても同じなので、対処方法を伝えて止める
+      if (/timeout|timed out|タイムアウト/i.test(e.message)) {
+        throw new Error('AIの応答が時間切れ（約60秒）になりました。もう一度実行するか、「設定」シートの effort を low にする、またはモデルを claude-sonnet-5-5 に変えると速くなります。');
+      }
+      throw e;
+    }
     const code = response.getResponseCode();
     const retryable = code === 429 || code >= 500;
     if (!retryable || attempt >= maxAttempts) return response;

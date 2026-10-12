@@ -32,6 +32,7 @@ const context = {
     fetch(url, req) {
       context.fetchCalls.push(req);
       const next = context.fetchQueue.shift();
+      if (next.throw) throw new Error(next.throw);
       return {
         getResponseCode: () => next.code,
         getContentText: () => next.body,
@@ -47,7 +48,14 @@ const test = (name, fn) => tests.push({ name, fn });
 context.test = test;
 context.assert = assert;
 
-vm.runInContext(source + '\n' + `
+// tests/*.test.js も同じ環境で読み込む
+const extraTests = fs.readdirSync(__dirname)
+  .filter(f => f.endsWith('.test.js'))
+  .sort()
+  .map(f => fs.readFileSync(path.join(__dirname, f), 'utf8'))
+  .join('\n');
+
+vm.runInContext(source + '\n' + extraTests + '\n' + `
 test('全角は2、半角は1、URLは23で数える', () => {
   assert.strictEqual(countXWeight_('abc'), 3);
   assert.strictEqual(countXWeight_('あいう'), 6);

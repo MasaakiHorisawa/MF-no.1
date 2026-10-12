@@ -1,5 +1,5 @@
 /**
- * 投稿予定のリマインド
+ * 毎朝の自動処理：noteの新着記事の取り込み ＋ 投稿予定のリマインド
  *
  * 今後7日間に予定している投稿（推敲済・予約済）が目標本数に足りないとき、メールで知らせます。
  */
@@ -9,13 +9,28 @@ function showWeeklyStatus() {
   SpreadsheetApp.getUi().alert(buildWeeklyStatus_().message);
 }
 
-/** 毎朝のトリガーから実行：足りないときだけメールを送る */
-function dailyReminder() {
-  const status = buildWeeklyStatus_();
-  if (!status.shortage) return;
+/** 毎朝のトリガーから実行：新着記事を取り込み、知らせることがあるときだけメールを送る */
+function dailyJobs() {
   const settings = getSettings_();
+  const notes = [];
+  if (settings['noteのRSS']) {
+    try {
+      const r = importNoteArticles_(settings);
+      if (r.added.length) notes.push(`noteの新着記事を取り込みました：${r.added.join('、')}`);
+      if (r.linked.length) notes.push(`下書きにURLを紐づけました：${r.linked.join('、')}`);
+      if (r.postsCreated) notes.push(`X投稿案を${r.postsCreated}件作りました。「X投稿」シートで推敲してください。`);
+      notes.push(...r.errors);
+    } catch (e) {
+      notes.push(`noteの取り込みに失敗しました：${e.message}`);
+    }
+  }
+  const status = buildWeeklyStatus_();
+  if (!status.shortage && !notes.length) return;
+
   const to = settings['リマインド送信先'] || Session.getEffectiveUser().getEmail();
-  MailApp.sendEmail(to, '【X投稿】今週の予定が不足しています', `${status.message}\n\n${SpreadsheetApp.getActiveSpreadsheet().getUrl()}`);
+  const subject = status.shortage ? '【X投稿】今週の予定が不足しています' : '【X投稿】新着記事を取り込みました';
+  const body = [status.message].concat(notes.length ? ['', ...notes] : [], ['', SpreadsheetApp.getActiveSpreadsheet().getUrl()]).join('\n');
+  MailApp.sendEmail(to, subject, body);
 }
 
 function buildWeeklyStatus_() {
@@ -53,20 +68,24 @@ function buildWeeklyStatus_() {
   return { shortage: shortage, message: lines.join('\n') };
 }
 
-/** 毎朝8時台のリマインドを有効にする（重複して登録しない） */
-function enableDailyReminder() {
-  disableDailyReminder_(true);
-  ScriptApp.newTrigger('dailyReminder').timeBased().everyDays(1).atHour(8).create();
-  SpreadsheetApp.getUi().alert('毎朝8時台に投稿予定を確認し、不足していればメールで知らせます。');
+/** 毎朝8時台の自動処理を有効にする（重複して登録しない） */
+function enableDailyJobs() {
+  removeDailyTriggers_();
+  ScriptApp.newTrigger('dailyJobs').timeBased().everyDays(1).atHour(8).create();
+  SpreadsheetApp.getUi().alert(
+    '毎朝8時台に次の処理を行います。\n' +
+    '・noteの新着記事を取り込み、X投稿案を作る（「設定」の「noteのRSS」が入っている場合）\n' +
+    '・今後7日間の投稿予定が目標より少なければメールで知らせる'
+  );
 }
 
-function disableDailyReminder() {
-  disableDailyReminder_(false);
+function disableDailyJobs() {
+  removeDailyTriggers_();
+  SpreadsheetApp.getUi().alert('毎朝の自動処理を停止しました。');
 }
 
-function disableDailyReminder_(silent) {
+function removeDailyTriggers_() {
   ScriptApp.getProjectTriggers()
-    .filter(t => t.getHandlerFunction() === 'dailyReminder')
+    .filter(t => t.getHandlerFunction() === 'dailyJobs')
     .forEach(t => ScriptApp.deleteTrigger(t));
-  if (!silent) SpreadsheetApp.getUi().alert('毎朝のリマインドを停止しました。');
 }
