@@ -10,7 +10,7 @@ test('通信の時間切れは再試行せず、対処方法を伝える', () =>
   assert.strictEqual(sleeps.length, 0);
 });
 
-test('送信前チェック：個人情報・ID・キー・法人名を見つける', () => {
+test('送信前チェック：個人情報・ID・キー・会社名を見つける', () => {
   const code = [
     "const SHEET_ID = '1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcdEF';",
     "GmailApp.sendEmail('yamada@client-corp.co.jp', '件名', '本文');",
@@ -19,12 +19,35 @@ test('送信前チェック：個人情報・ID・キー・法人名を見つけ
     "// 担当：山田商事株式会社 03-1234-9876",
   ].join('\n');
   const labels = findSensitive_(code).map(f => f.label);
-  ['ファイル・フォルダIDらしき文字列', 'メールアドレス', 'APIキー・トークン', 'GoogleドライブのURL', '法人名', '電話番号']
+  ['ファイル・フォルダID', 'メールアドレス', 'APIキー・トークン', 'GoogleドライブのURL', '会社名', '電話番号']
     .forEach(l => assert.ok(labels.includes(l), l + ' が検出されていない: ' + labels.join(',')));
-  assert.match(describeSensitive_(findSensitive_(code)), /^送信前に置き換えてください：/);
 });
 
-test('送信前チェック：ダミーや一般的なコードは止めない', () => {
+test('自動置き換え：ダミーに置き換え、同じ値は同じダミーにし、置き換え後は何も残らない', () => {
+  const code = [
+    "const SRC = DriveApp.getFolderById('1xYzAbCdEfGhIjKlMnOpQrStUvWx');",
+    "const DST = DriveApp.getFolderById('9zZzAbCdEfGhIjKlMnOpQrStUvWx');",
+    "const AGAIN = '1xYzAbCdEfGhIjKlMnOpQrStUvWx';",
+    "const url = 'https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit';",
+    "MailApp.sendEmail('yamada@client-corp.co.jp', '株式会社山田 御中', '');",
+    "const pass = { password: 'hunter2hunter2' };",
+    "// 〒190-0012 東京都立川市曙町 普通 1234567",
+  ].join('\n');
+  const masked = maskSensitive_(code);
+  assert.match(masked.text, /getFolderById\('YOUR_ID_1'\)/);
+  assert.match(masked.text, /getFolderById\('YOUR_ID_2'\)/);
+  assert.match(masked.text, /AGAIN = 'YOUR_ID_1'/);
+  assert.match(masked.text, /\/spreadsheets\/d\/YOUR_FILE_ID_1\/edit/);
+  assert.match(masked.text, /user1@example\.com/);
+  assert.match(masked.text, /株式会社サンプル 御中/);
+  assert.match(masked.text, /password: 'YOUR_SECRET'/);
+  assert.match(masked.text, /〒000-0000 〇〇県〇〇市曙町 普通 0000000/);
+  assert.strictEqual(findSensitive_(masked.text).length, 0, JSON.stringify(findSensitive_(masked.text)));
+  assert.match(describeReplacements_(masked.replacements), /^自動で置き換え：.*ファイル・フォルダID 2件/);
+  assert.strictEqual(describeReplacements_([]), 'OK');
+});
+
+test('自動置き換え：ダミーや一般的なコードは変えない', () => {
   const code = [
     "const CONFIG = { SHEET_ID: 'YOUR_SHEET_ID', TO: 'test@example.com' };",
     "const company = 'サンプル株式会社';",
@@ -33,6 +56,9 @@ test('送信前チェック：ダミーや一般的なコードは止めない',
     "sheet.getRange('A1:B10').setValues(values);",
   ].join('\n');
   assert.strictEqual(findSensitive_(code).length, 0, JSON.stringify(findSensitive_(code)));
+  const masked = maskSensitive_(code);
+  assert.strictEqual(masked.text, code);
+  assert.strictEqual(masked.replacements.length, 0);
 });
 
 test('Markdown を Google ドキュメント取り込み用の HTML にする', () => {
@@ -65,6 +91,12 @@ test('分析スキーマ：すべての object が構造化出力の条件を満
   assert.strictEqual(schema.properties.price.properties.recommended.type, 'integer');
   assert.strictEqual(JSON.stringify(schema.properties.recommended_type.enum), JSON.stringify(ARTICLE_TYPES));
   walk(buildMarkdownSchema_(), 'markdown');
+});
+
+test('下書きの組み立て：有料記事の最後にサポート方針がそのまま入る', () => {
+  const md = assembleDraftMarkdown_({ title: 'T', type: '有料', price: 980, support: '- 窓口：コメント欄' }, '無料', '有料');
+  assert.match(md, /有料\n\n## サポートについて\n\n- 窓口：コメント欄$/);
+  assert.doesNotMatch(assembleDraftMarkdown_({ title: 'T', type: '無料', price: '', support: '- 窓口' }, '本文', ''), /サポートについて/);
 });
 
 test('下書きの組み立て：有料は有料エリアと価格、無料は有料エリアなし', () => {
@@ -133,6 +165,6 @@ test('noteのプロフィールURLをRSSのURLに直す', () => {
 test('送信前チェック：マイナンバー・口座番号・郵便番号・住所も見つける', () => {
   const code = "const memo = '普通 1234567 / 〒190-0012 東京都立川市曙町 / 番号 123456789012';";
   const labels = findSensitive_(code).map(f => f.label);
-  ['口座番号', '郵便番号', '住所', 'マイナンバー・法人番号らしき数字'].forEach(l => assert.ok(labels.includes(l), l + ': ' + labels.join(',')));
+  ['口座番号', '郵便番号', '住所', 'マイナンバー・法人番号'].forEach(l => assert.ok(labels.includes(l), l + ': ' + labels.join(',')));
   assert.strictEqual(findSensitive_("const d = new Date(1700000000000.5); const zip = '123-4567'; const pref = '〇〇県〇〇市';").length, 0);
 });

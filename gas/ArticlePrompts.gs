@@ -136,6 +136,7 @@ function buildArticlePaidPrompt_(idea, plan) {
     '次の分析をもとに、note記事の「有料エリア」の本文を書いてください。',
     '- 完全版のコードは書き写さず、その位置に「【ここに完全版コードを貼る】」とだけ書く。',
     '- 含める見出し：導入手順（required_setup にあるものだけ）／設定項目の説明／処理の解説（関数名を出して要所だけ）／よくあるエラーと対処／自分の業務に合わせて変える方法。',
+    '- サポートの範囲や問い合わせ先は書かない（あとで定型文を自動で付ける）。',
     '- 1,500〜2,500字。',
     '',
     '## 分析',
@@ -167,6 +168,8 @@ function assembleDraftMarkdown_(meta, freeMd, paidMd) {
   ];
   if (meta.type !== '無料' && paidMd) {
     header.push('', '---', '', '## ▼▼▼ ここから有料エリア ▼▼▼', '', paidMd.trim());
+    // サポートの約束は記事ごとにぶれないよう、AIに書かせず「設定」シートの文面をそのまま入れる
+    if (meta.support) header.push('', '## サポートについて', '', String(meta.support).trim());
   }
   return header.join('\n');
 }

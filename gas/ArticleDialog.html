@@ -26,6 +26,8 @@
   button:disabled { opacity: .5; cursor: default; }
   .status { color: var(--sub); font-size: 13px; }
   .error { background: #fce8e6; color: var(--warn); padding: 10px 12px; border-radius: 6px; margin: 10px 0; white-space: pre-wrap; }
+  .notice { background: #e6f4ea; color: #0d652d; padding: 10px 12px; border-radius: 6px; margin: 10px 0; font-size: 13px; }
+  .notice code { background: #fff; padding: 0 4px; border-radius: 3px; }
   .card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 10px 0; }
   .price { display: flex; align-items: baseline; gap: 12px; }
   .price .big { font-size: 28px; font-weight: bold; color: var(--accent); }
@@ -40,11 +42,12 @@
 <div class="wrap">
   <div class="steps"><div id="s1" class="on">1. GASを貼る</div><div id="s2">2. 分析・価格診断</div><div id="s3">3. 下書き作成</div></div>
   <div id="err" class="error hidden"></div>
+  <div id="notice" class="notice hidden"></div>
 
   <!-- 段階1：入力 -->
   <section id="step1">
     <h3>GASのコード</h3>
-    <textarea id="code" class="code" placeholder="過去に作ったGASをそのまま貼り付けてください。&#10;メールアドレス・スプレッドシートID・会社名などがあれば、送信前に自動で止めます。"></textarea>
+    <textarea id="code" class="code" placeholder="過去に作ったGASをそのまま貼り付けてください。&#10;フォルダID・メールアドレス・会社名などは、送る前に自動でダミー（YOUR_FOLDER_ID_1 など）に置き換えます。"></textarea>
 
     <h3>記事のイメージ <span class="hint">（任意・箇条書きでOK）</span></h3>
     <textarea id="image" class="image" placeholder="例）&#10;・小さな事務所の経理担当向け&#10;・月初の作業が3分→数秒になったことを強調&#10;・初心者でも迷わないよう導入手順を丁寧に"></textarea>
@@ -165,17 +168,21 @@
 
   function analyze() {
     error('');
+    show('notice', false);
     busy(true, '仕組みを読み解いています…（30秒ほど）');
     call('articleAnalyze', {
       row: state.row, code: $('code').value, image: $('image').value, type: selectedType(), price: $('price').value,
     }).then(function (res) {
       busy(false);
       state.row = res.row;
-      if (res.sensitive) {
-        error('外部に送るべきでない情報が含まれている可能性があるため、送信を止めました。\n\n' +
-          res.sensitive.map(function (f) { return '・' + f.label + '：' + f.sample; }).join('\n') +
-          '\n\n「サンプル株式会社」「test@example.com」「YOUR_SHEET_ID」などに置き換えてから、もう一度押してください。');
-        return;
+      // フォルダID・メールアドレス・会社名などはサーバー側でダミーに置き換え済み。画面の入力欄も置き換え後にそろえる
+      $('code').value = res.code;
+      $('image').value = res.image;
+      if (res.replacements && res.replacements.length) {
+        $('notice').innerHTML = '<b>次の情報をダミーに置き換えてから送りました（シートにも置き換え後だけを保存）。</b><ul>' +
+          res.replacements.map(function (r) { return '<li>' + esc(r.label) + '：' + esc(r.before) + ' → <code>' + esc(r.after) + '</code></li>'; }).join('') +
+          '</ul>記事に載るコードもこのダミーになります。人名など、形の決まっていない情報は自動では見つけられないので、目でも確認してください。';
+        show('notice', true);
       }
       state.plan = res.plan;
       showPlan();

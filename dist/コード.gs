@@ -65,6 +65,14 @@ const DEFAULT_SETTINGS = [
   ['新着記事の投稿案を自動作成', 'する', 'する / しない。毎朝の自動処理で、取り込んだ記事のX投稿案も作る'],
   ['effort（記事）', 'low', '記事下書きの作成に使う effort。medium は丁寧だが時間切れになりやすい'],
   ['記事のお手本（任意）', '', '過去の記事本文を1本貼ると、下書きの文体をそれに寄せる'],
+  ['サポート方針（有料記事）', [
+    '- 対応する内容：記事のとおりに設定しても動かない場合の不具合対応と、導入時のエラー解決（購入から30日以内）',
+    '- 対応しない内容：ご自身の業務に合わせた改造・機能追加（別途有償でご相談ください）、税務・会計の個別のご相談',
+    '- 窓口：この記事のコメント欄、またはnoteの「クリエイターへのお問い合わせ」',
+    '- 回答の目安：3営業日以内（本業があるため、すぐのお返事はできません）',
+    '- Google側の仕様変更で動かなくなった場合は、記事とコードを更新してお知らせします',
+    '- ご利用は自己責任でお願いします。必ずテスト用のシートで動作を確認してから、実際のデータでお使いください',
+  ].join('\n'), '有料記事の下書きの最後に「サポートについて」としてそのまま入る。1行1項目'],
 ];
 
 // ===== Sheets.gs ======================================================
@@ -623,6 +631,7 @@ function buildArticlePaidPrompt_(idea, plan) {
     '次の分析をもとに、note記事の「有料エリア」の本文を書いてください。',
     '- 完全版のコードは書き写さず、その位置に「【ここに完全版コードを貼る】」とだけ書く。',
     '- 含める見出し：導入手順（required_setup にあるものだけ）／設定項目の説明／処理の解説（関数名を出して要所だけ）／よくあるエラーと対処／自分の業務に合わせて変える方法。',
+    '- サポートの範囲や問い合わせ先は書かない（あとで定型文を自動で付ける）。',
     '- 1,500〜2,500字。',
     '',
     '## 分析',
@@ -654,6 +663,8 @@ function assembleDraftMarkdown_(meta, freeMd, paidMd) {
   ];
   if (meta.type !== '無料' && paidMd) {
     header.push('', '---', '', '## ▼▼▼ ここから有料エリア ▼▼▼', '', paidMd.trim());
+    // サポートの約束は記事ごとにぶれないよう、AIに書かせず「設定」シートの文面をそのまま入れる
+    if (meta.support) header.push('', '## サポートについて', '', String(meta.support).trim());
   }
   return header.join('\n');
 }
@@ -730,48 +741,98 @@ function checkPost_(body, link, ngWordsCsv) {
 // ===== Sanitize.gs ====================================================
 
 /**
- * 送信前チェック：貼り付けたコードに、外部（Claude）へ送るべきでない情報が含まれていないか調べる
+ * 送信前チェック：貼り付けたコードに、外部（Claude）へ送るべきでない情報が含まれていないか調べ、自動で置き換える
  *
- * 見つかった場合は送信を止め、どこを置き換えればよいかを表示します。
+ * フォルダID・メールアドレス・会社名などを「YOUR_FOLDER_ID_1」「user1@example.com」「サンプル株式会社」のような
+ * ダミーに置き換えてから送ります。同じ値は同じダミーに置き換えるので、コードの意味は保たれます。
+ * 置き換え後のコードは、そのまま記事に載せても安全な形になります。
  * 「サンプル株式会社」「test@example.com」のような、明らかなダミーは対象外です。
+ * 人名など、決まった形のない情報は見つけられないので、貼る前に目でも確認してください。
  */
 
+const LEGAL_FORMS = /株式会社|有限会社|合同会社|税理士法人|医療法人|社会福祉法人/;
+const nth_ = n => (n > 1 ? String(n) : '');
+
+// mask：見つかった文字列（hit）と、その種類で何件目か（n）から、置き換え後の文字列を作る
 const SENSITIVE_PATTERNS = [
-  { label: 'メールアドレス', re: /[\w.+-]+@[\w-]+(\.[\w-]+)+/g, allow: /@example\.(com|jp|org)$|^(test|sample|user|your|foo)[\w.+-]*@/i },
-  { label: 'APIキー・トークン', re: /sk-[A-Za-z0-9_-]{16,}|AIza[0-9A-Za-z_-]{30,}|xox[abprs]-[A-Za-z0-9-]{10,}|ghp_[A-Za-z0-9]{20,}/g },
-  { label: 'パスワード・秘密情報', re: /(password|passwd|secret|api[_-]?key|token)\s*[:=]\s*['"][^'"\s]{6,}['"]/gi },
-  { label: 'GoogleドライブのURL', re: /https:\/\/(docs|drive)\.google\.com\/[^\s'"`)]*\/(d|folders)\/[A-Za-z0-9_-]{20,}/g },
-  { label: 'ファイル・フォルダIDらしき文字列', re: /['"`][A-Za-z0-9_-]{25,}['"`]/g },
-  { label: '電話番号', re: /0\d{1,4}-\d{1,4}-\d{3,4}/g, allow: /^0{2,}|0000|1234-5678/ },
-  { label: 'マイナンバー・法人番号らしき数字', re: /(?<![\d.])\d{12,13}(?![\d.])/g },
-  { label: '口座番号', re: /(普通|当座|口座(番号)?)\s*[:：]?\s*\d{7}/g },
-  { label: '郵便番号', re: /〒\s*\d{3}-?\d{4}|(?<![\d-])\d{3}-\d{4}(?![\d-])/g, allow: /000-0000|123-4567/ },
-  { label: '住所', re: /(北海道|東京都|京都府|大阪府|[^\s'"`、。]{2,3}県)[^\s'"`、。]{1,8}?[市区町村郡]/g, allow: /サンプル|テスト|〇〇|○○|例/ },
-  { label: '法人名', re: /(株式会社|有限会社|合同会社|税理士法人|医療法人|社会福祉法人)[^\s'"`、。,）)]{1,12}|[^\s'"`、。,（(]{1,12}(株式会社|有限会社|合同会社|税理士法人|医療法人)/g, allow: /サンプル|テスト|〇〇|○○|ＡＢＣ|ABC|XYZ|例|架空|ダミー/ },
+  { label: 'メールアドレス', re: /[\w.+-]+@[\w-]+(\.[\w-]+)+/g, allow: /@example\.(com|jp|org)$|^(test|sample|user|your|foo)[\w.+-]*@/i,
+    mask: (hit, n) => `user${n}@example.com` },
+  { label: 'APIキー・トークン', re: /sk-[A-Za-z0-9_-]{16,}|AIza[0-9A-Za-z_-]{30,}|xox[abprs]-[A-Za-z0-9-]{10,}|ghp_[A-Za-z0-9]{20,}/g,
+    mask: (hit, n) => `YOUR_API_KEY${nth_(n)}` },
+  { label: 'パスワード・秘密情報', re: /(password|passwd|secret|api[_-]?key|token)\s*[:=]\s*['"][^'"\s]{6,}['"]/gi, allow: /YOUR_/,
+    mask: hit => hit.replace(/(['"])[^'"\s]{6,}(['"])$/, '$1YOUR_SECRET$2') },
+  { label: 'GoogleドライブのURL', re: /https:\/\/(docs|drive)\.google\.com\/[^\s'"`)]*\/(d|folders)\/[A-Za-z0-9_-]{20,}/g,
+    mask: (hit, n) => hit.replace(/\/(d|folders)\/[A-Za-z0-9_-]{20,}$/, (m, kind) => `/${kind}/${kind === 'folders' ? 'YOUR_FOLDER_ID' : 'YOUR_FILE_ID'}_${n}`) },
+  { label: 'ファイル・フォルダID', re: /['"`][A-Za-z0-9_-]{25,}['"`]/g,
+    mask: (hit, n) => `${hit[0]}YOUR_ID_${n}${hit[hit.length - 1]}` },
+  { label: '電話番号', re: /0\d{1,4}-\d{1,4}-\d{3,4}/g, allow: /^0{2,}|0000|1234-5678/,
+    mask: () => '03-0000-0000' },
+  { label: 'マイナンバー・法人番号', re: /(?<![\d.])\d{12,13}(?![\d.])/g, allow: /^0+$/,
+    mask: hit => '0'.repeat(hit.length) },
+  { label: '口座番号', re: /(普通|当座|口座(番号)?)\s*[:：]?\s*\d{7}/g, allow: /0000000/,
+    mask: hit => hit.replace(/\d{7}$/, '0000000') },
+  { label: '郵便番号', re: /〒\s*\d{3}-?\d{4}|(?<![\d-])\d{3}-\d{4}(?![\d-])/g, allow: /000-0000|123-4567/,
+    mask: hit => (hit.startsWith('〒') ? '〒000-0000' : '000-0000') },
+  { label: '住所', re: /(北海道|東京都|京都府|大阪府|[^\s'"`、。]{2,3}県)[^\s'"`、。]{1,8}?[市区町村郡]/g, allow: /サンプル|テスト|〇〇|○○|例/,
+    mask: () => '〇〇県〇〇市' },
+  { label: '会社名', re: /(株式会社|有限会社|合同会社|税理士法人|医療法人|社会福祉法人)[^\s'"`、。,）)]{1,12}|[^\s'"`、。,（(]{1,12}(株式会社|有限会社|合同会社|税理士法人|医療法人)/g, allow: /サンプル|テスト|〇〇|○○|ＡＢＣ|ABC|XYZ|例|架空|ダミー/,
+    mask: (hit, n) => {
+      const form = hit.match(LEGAL_FORMS)[0];
+      return hit.startsWith(form) ? `${form}サンプル${nth_(n)}` : `サンプル${nth_(n)}${form}`;
+    } },
 ];
 
 /**
- * @param {string} code
+ * 外部に送るべきでない情報を探す（置き換えはしない）
  * @return {Array<{label: string, sample: string}>} 見つかった項目（同じ文字列は1回だけ）
  */
-function findSensitive_(code) {
+function findSensitive_(text) {
   const found = [];
   const seen = new Set();
   SENSITIVE_PATTERNS.forEach(p => {
-    (String(code).match(p.re) || []).forEach(hit => {
+    (String(text).match(p.re) || []).forEach(hit => {
       if (p.allow && p.allow.test(hit)) return;
       const key = `${p.label}:${hit}`;
       if (seen.has(key)) return;
       seen.add(key);
-      found.push({ label: p.label, sample: hit.length > 40 ? `${hit.slice(0, 40)}…` : hit });
+      found.push({ label: p.label, sample: truncate_(hit) });
     });
   });
   return found;
 }
 
+/**
+ * 見つかった情報をダミーに置き換える
+ * @return {{text: string, replacements: Array<{label: string, before: string, after: string}>}}
+ */
+function maskSensitive_(text) {
+  let result = String(text);
+  const replacements = [];
+  SENSITIVE_PATTERNS.forEach(p => {
+    const mapping = new Map(); // 同じ値には同じダミーを使う
+    result = result.replace(p.re, hit => {
+      if (p.allow && p.allow.test(hit)) return hit;
+      if (!mapping.has(hit)) {
+        const after = p.mask(hit, mapping.size + 1);
+        mapping.set(hit, after);
+        replacements.push({ label: p.label, before: truncate_(hit), after: after });
+      }
+      return mapping.get(hit);
+    });
+  });
+  return { text: result, replacements: replacements };
+}
+
 /** チェック列に書く文章 */
-function describeSensitive_(found) {
-  return '送信前に置き換えてください：' + found.map(f => `${f.label}「${f.sample}」`).join('、');
+function describeReplacements_(replacements) {
+  if (!replacements.length) return 'OK';
+  const counts = {};
+  replacements.forEach(r => { counts[r.label] = (counts[r.label] || 0) + 1; });
+  return '自動で置き換え：' + Object.keys(counts).map(l => `${l} ${counts[l]}件`).join('、');
+}
+
+function truncate_(text) {
+  return text.length > 40 ? `${text.slice(0, 40)}…` : text;
 }
 
 // ===== Docs.gs ========================================================
@@ -1069,19 +1130,21 @@ function articleAnalyze(input) {
     throw new Error(`コードが長すぎます（${idea.code.length}字）。記事にしたい部分だけ、${APP.MAX_CODE_CHARS}字以内で貼ってください。`);
   }
 
+  // フォルダID・メールアドレス・会社名などは、送る前にダミーへ置き換える（シートにも置き換え後の内容だけを残す）
+  const maskedCode = maskSensitive_(idea.code);
+  const maskedImage = maskSensitive_(idea.image);
+  idea.code = maskedCode.text;
+  idea.image = maskedImage.text;
+  const replacements = maskedCode.replacements.concat(maskedImage.replacements);
+
   const ideas = ensureIdeasSheet_();
   const row = saveIdeaRow_(ideas, input.row, {
     '記事のイメージ': idea.image,
     'コード': idea.code,
     '種別': idea.type === 'おまかせ' ? '' : idea.type,
     '価格': idea.price,
+    'チェック': describeReplacements_(replacements),
   });
-
-  const sensitive = findSensitive_(idea.code + '\n' + idea.image);
-  if (sensitive.length) {
-    saveIdeaRow_(ideas, row, { 'チェック': describeSensitive_(sensitive) });
-    return { row: row, sensitive: sensitive };
-  }
 
   const settings = getSettings_();
   const plan = callClaudeJson_({
@@ -1092,8 +1155,8 @@ function articleAnalyze(input) {
     schema: buildArticleAnalyzeSchema_(),
     maxTokens: 12000,
   });
-  saveIdeaRow_(ideas, row, { 'チェック': 'OK', 'ステータス': '分析済', '分析結果': JSON.stringify(plan) });
-  return { row: row, plan: plan };
+  saveIdeaRow_(ideas, row, { 'ステータス': '分析済', '分析結果': JSON.stringify(plan) });
+  return { row: row, plan: plan, code: idea.code, image: idea.image, replacements: replacements };
 }
 
 /**
@@ -1101,10 +1164,13 @@ function articleAnalyze(input) {
  * @param {{section: 'free'|'paid', code: string, image: string, type: string, price: number, plan: Object}} input
  */
 function articleWriteSection(input) {
-  const idea = { code: input.code, image: input.image, type: input.type, price: normalizePrice_(input.price) };
-  // 書く前にもう一度チェック（画面でコードを書き換えた場合に備える）
-  const sensitive = findSensitive_(idea.code + '\n' + idea.image);
-  if (sensitive.length) throw new Error(describeSensitive_(sensitive));
+  // 画面でコードやイメージを書き換えた場合に備えて、書く前にもう一度置き換える
+  const idea = {
+    code: maskSensitive_(input.code).text,
+    image: maskSensitive_(input.image).text,
+    type: input.type,
+    price: normalizePrice_(input.price),
+  };
 
   const settings = getSettings_();
   const prompt = input.section === 'paid'
@@ -1131,6 +1197,7 @@ function articleFinish(input) {
     titleAlternatives: (input.plan.title_alternatives || []).filter(t => t !== input.title),
     type: input.type,
     price: input.type === '無料' ? '' : normalizePrice_(input.price),
+    support: getSettings_()['サポート方針（有料記事）'],
   };
   const docUrl = createDraftDoc_(`【下書き】${meta.title}`, assembleDraftMarkdown_(meta, input.freeMd, input.paidMd));
   const articleId = registerDraftArticle_(meta, input.freeMd, docUrl);
@@ -1424,4 +1491,4 @@ function removeDailyTriggers_() {
 
 // ===== ArticleDialog.html（埋め込み）========================================
 
-const ARTICLE_DIALOG_HTML = "<!DOCTYPE html>\n<html>\n<head>\n<base target=\"_top\">\n<meta charset=\"UTF-8\">\n<style>\n  :root { --ink:#202124; --sub:#5f6368; --line:#dadce0; --bg:#f8f9fa; --accent:#1a73e8; --ok:#188038; --warn:#b3261e; }\n  * { box-sizing: border-box; }\n  body { font-family: \"Hiragino Sans\", \"Noto Sans JP\", Meiryo, sans-serif; color: var(--ink); margin: 0; font-size: 14px; line-height: 1.6; }\n  .wrap { padding: 4px 8px 80px; }\n  .steps { display: flex; gap: 8px; margin-bottom: 16px; }\n  .steps div { flex: 1; padding: 6px 10px; border-radius: 6px; background: var(--bg); color: var(--sub); font-size: 13px; }\n  .steps div.on { background: #e8f0fe; color: var(--accent); font-weight: bold; }\n  h3 { font-size: 15px; margin: 18px 0 6px; }\n  label.hint, .hint { color: var(--sub); font-size: 12px; }\n  textarea, input[type=text], input[type=number], select { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 8px; font-size: 13px; font-family: inherit; }\n  textarea.code { font-family: Consolas, \"Courier New\", monospace; height: 220px; white-space: pre; }\n  textarea.image { height: 90px; }\n  .row { display: flex; gap: 16px; }\n  .row > div { flex: 1; }\n  .types label { display: inline-block; margin: 4px 14px 4px 0; cursor: pointer; }\n  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--line); padding: 10px 16px; display: flex; gap: 10px; align-items: center; }\n  button { border: 0; border-radius: 6px; padding: 9px 18px; font-size: 14px; cursor: pointer; }\n  button.primary { background: var(--accent); color: #fff; }\n  button.ghost { background: var(--bg); color: var(--ink); }\n  button:disabled { opacity: .5; cursor: default; }\n  .status { color: var(--sub); font-size: 13px; }\n  .error { background: #fce8e6; color: var(--warn); padding: 10px 12px; border-radius: 6px; margin: 10px 0; white-space: pre-wrap; }\n  .card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 10px 0; }\n  .price { display: flex; align-items: baseline; gap: 12px; }\n  .price .big { font-size: 28px; font-weight: bold; color: var(--accent); }\n  ul { margin: 4px 0; padding-left: 20px; }\n  .hidden { display: none; }\n  .done a { font-size: 15px; font-weight: bold; color: var(--accent); }\n  .progress li.now { color: var(--accent); font-weight: bold; }\n  .progress li.ok { color: var(--ok); }\n</style>\n</head>\n<body>\n<div class=\"wrap\">\n  <div class=\"steps\"><div id=\"s1\" class=\"on\">1. GASを貼る</div><div id=\"s2\">2. 分析・価格診断</div><div id=\"s3\">3. 下書き作成</div></div>\n  <div id=\"err\" class=\"error hidden\"></div>\n\n  <!-- 段階1：入力 -->\n  <section id=\"step1\">\n    <h3>GASのコード</h3>\n    <textarea id=\"code\" class=\"code\" placeholder=\"過去に作ったGASをそのまま貼り付けてください。&#10;メールアドレス・スプレッドシートID・会社名などがあれば、送信前に自動で止めます。\"></textarea>\n\n    <h3>記事のイメージ <span class=\"hint\">（任意・箇条書きでOK）</span></h3>\n    <textarea id=\"image\" class=\"image\" placeholder=\"例）&#10;・小さな事務所の経理担当向け&#10;・月初の作業が3分→数秒になったことを強調&#10;・初心者でも迷わないよう導入手順を丁寧に\"></textarea>\n\n    <div class=\"row\">\n      <div>\n        <h3>記事の種別</h3>\n        <div class=\"types\" id=\"types\"></div>\n      </div>\n      <div>\n        <h3>価格 <span class=\"hint\">（空欄ならAIが提案）</span></h3>\n        <input type=\"text\" id=\"price\" placeholder=\"例）1980\">\n        <div class=\"hint\">決めている価格を入れると、妥当かどうかも診断します。</div>\n      </div>\n    </div>\n  </section>\n\n  <!-- 段階2：分析結果 -->\n  <section id=\"step2\" class=\"hidden\">\n    <div class=\"card\">\n      <h3 style=\"margin-top:0\">このGASの仕組み</h3>\n      <div id=\"summary\"></div>\n      <div class=\"hint\" style=\"margin-top:6px\">処理の流れ</div>\n      <ul id=\"flow\"></ul>\n      <div class=\"hint\">使う前に必要な準備</div>\n      <ul id=\"setup\"></ul>\n    </div>\n\n    <div class=\"card\">\n      <h3 style=\"margin-top:0\">価格診断</h3>\n      <div class=\"price\"><span class=\"big\" id=\"recPrice\"></span><span id=\"range\" class=\"hint\"></span></div>\n      <div id=\"assessment\" style=\"margin:4px 0\"></div>\n      <div class=\"hint\">理由</div>\n      <ul id=\"reasons\"></ul>\n      <div class=\"hint\">もっと高く売るための工夫</div>\n      <ul id=\"valueUp\"></ul>\n      <div class=\"hint\">おすすめの種別：<b id=\"recType\"></b>　<span id=\"typeReason\"></span></div>\n    </div>\n\n    <div class=\"card\">\n      <h3 style=\"margin-top:0\">この内容で作る（自由に変更できます）</h3>\n      <div class=\"hint\">タイトル</div>\n      <select id=\"titleSelect\"></select>\n      <input type=\"text\" id=\"title\" style=\"margin-top:6px\">\n      <div class=\"row\" style=\"margin-top:8px\">\n        <div><div class=\"hint\">種別</div><select id=\"finalType\"></select></div>\n        <div id=\"finalPriceBox\"><div class=\"hint\">価格（円）</div><input type=\"number\" id=\"finalPrice\" min=\"0\" step=\"10\"></div>\n      </div>\n      <div class=\"hint\" style=\"margin-top:8px\">記事のイメージ（追記すると下書きに反映）</div>\n      <textarea id=\"image2\" class=\"image\"></textarea>\n      <div class=\"hint\" style=\"margin-top:6px\">想定読者：<span id=\"reader\"></span></div>\n    </div>\n  </section>\n\n  <!-- 段階3：下書き作成 -->\n  <section id=\"step3\" class=\"hidden\">\n    <h3>下書きを作成しています</h3>\n    <ol class=\"progress\" id=\"progress\"></ol>\n    <div id=\"done\" class=\"done hidden card\">\n      <div>下書きができました👇</div>\n      <a id=\"docLink\" href=\"#\" target=\"_blank\">Googleドキュメントを開く</a>\n      <ol style=\"margin-top:10px\">\n        <li>【要確認】の箇所を埋めて推敲する</li>\n        <li id=\"pasteCode\">【ここに完全版コードを貼る】に完全版のコードを貼る</li>\n        <li>noteに貼り付け、公開設定で種別と価格を入れて公開する</li>\n        <li>公開後は毎朝の自動処理（またはメニュー「noteの新着記事を取り込む」）でURLが紐づき、X投稿案も作られます</li>\n      </ol>\n    </div>\n  </section>\n</div>\n\n<div class=\"bar\">\n  <button class=\"ghost hidden\" id=\"back\" onclick=\"backToInput()\">← 入力に戻る</button>\n  <button class=\"primary\" id=\"next\" onclick=\"analyze()\">仕組みを分析して価格を診断</button>\n  <span class=\"status\" id=\"status\"></span>\n</div>\n\n<script>\n  var state = { row: null, plan: null };\n  var TYPES = [];\n\n  function $(id) { return document.getElementById(id); }\n  function show(id, on) { $(id).classList.toggle('hidden', !on); }\n  function esc(s) { return String(s == null ? '' : s).replace(/[&<>\"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[c]; }); }\n  function yen(n) { return (n === '' || n == null) ? '未定' : String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',') + '円'; }\n  function list(id, items) { $(id).innerHTML = (items || []).map(function (t) { return '<li>' + esc(t) + '</li>'; }).join(''); }\n  function setStep(n) { [1, 2, 3].forEach(function (i) { $('s' + i).classList.toggle('on', i === n); show('step' + i, i === n); }); }\n  function busy(on, msg) { $('next').disabled = on; $('back').disabled = on; $('status').textContent = msg || ''; }\n  function error(msg) { $('err').textContent = msg; show('err', !!msg); }\n  function selectedType() { var r = document.querySelector('input[name=type]:checked'); return r ? r.value : 'おまかせ'; }\n  function call(fn, arg) {\n    return new Promise(function (resolve, reject) {\n      google.script.run.withSuccessHandler(resolve).withFailureHandler(function (e) { reject(e && e.message ? e.message : String(e)); })[fn](arg);\n    });\n  }\n\n  function init() {\n    busy(true, '読み込み中…');\n    call('articleDialogInit').then(function (res) {\n      TYPES = res.types;\n      $('types').innerHTML = ['おまかせ'].concat(TYPES).map(function (t, i) {\n        return '<label><input type=\"radio\" name=\"type\" value=\"' + esc(t) + '\"' + (i === 0 ? ' checked' : '') + '> ' + esc(t) + '</label>';\n      }).join('');\n      $('finalType').innerHTML = TYPES.map(function (t) { return '<option>' + esc(t) + '</option>'; }).join('');\n      if (!res.hasApiKey) error('APIキーが未設定です。画面を閉じて、メニュー「② APIキーを設定」を先に実行してください。');\n      if (res.prefill) {\n        state.row = res.prefill.row;\n        $('code').value = res.prefill.code;\n        $('image').value = res.prefill.image;\n        $('price').value = res.prefill.price;\n        var r = document.querySelector('input[name=type][value=\"' + res.prefill.type + '\"]');\n        if (r) r.checked = true;\n        if (res.prefill.plan) { state.plan = res.prefill.plan; showPlan(); }\n      }\n      busy(false);\n    }).catch(function (e) { busy(false); error(e); });\n  }\n\n  function analyze() {\n    error('');\n    busy(true, '仕組みを読み解いています…（30秒ほど）');\n    call('articleAnalyze', {\n      row: state.row, code: $('code').value, image: $('image').value, type: selectedType(), price: $('price').value,\n    }).then(function (res) {\n      busy(false);\n      state.row = res.row;\n      if (res.sensitive) {\n        error('外部に送るべきでない情報が含まれている可能性があるため、送信を止めました。\\n\\n' +\n          res.sensitive.map(function (f) { return '・' + f.label + '：' + f.sample; }).join('\\n') +\n          '\\n\\n「サンプル株式会社」「test@example.com」「YOUR_SHEET_ID」などに置き換えてから、もう一度押してください。');\n        return;\n      }\n      state.plan = res.plan;\n      showPlan();\n    }).catch(function (e) { busy(false); error(e); });\n  }\n\n  function showPlan() {\n    var p = state.plan;\n    $('summary').textContent = p.mechanism_summary;\n    list('flow', p.flow);\n    list('setup', p.required_setup);\n    $('recPrice').textContent = yen(p.price.recommended);\n    $('range').textContent = '（目安 ' + yen(p.price.low) + '〜' + yen(p.price.high) + '）';\n    $('assessment').textContent = p.price.assessment || '';\n    list('reasons', p.price.reasons);\n    list('valueUp', p.price.value_up_ideas);\n    $('recType').textContent = p.recommended_type;\n    $('typeReason').textContent = p.type_reason;\n    $('reader').textContent = p.target_reader;\n\n    var titles = [p.title].concat(p.title_alternatives || []);\n    $('titleSelect').innerHTML = titles.map(function (t) { return '<option>' + esc(t) + '</option>'; }).join('');\n    $('titleSelect').onchange = function () { $('title').value = this.value; };\n    $('title').value = p.title;\n\n    var chosen = selectedType();\n    $('finalType').value = chosen === 'おまかせ' ? p.recommended_type : chosen;\n    var userPrice = $('price').value.replace(/[^\\d０-９]/g, '');\n    $('finalPrice').value = userPrice ? Number(userPrice.replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })) : p.price.recommended;\n    $('finalType').onchange = togglePrice;\n    togglePrice();\n    $('image2').value = $('image').value;\n\n    setStep(2);\n    show('back', true);\n    $('next').textContent = 'この内容で下書きを作成';\n    $('next').onclick = writeDraft;\n  }\n\n  function togglePrice() { show('finalPriceBox', $('finalType').value !== '無料'); }\n\n  function backToInput() {\n    error('');\n    setStep(1);\n    show('back', false);\n    $('next').textContent = '仕組みを分析して価格を診断';\n    $('next').onclick = analyze;\n  }\n\n  function writeDraft() {\n    error('');\n    var type = $('finalType').value;\n    var base = { code: $('code').value, image: $('image2').value, type: type, price: $('finalPrice').value, plan: state.plan };\n    var steps = type === '無料'\n      ? [['free', '本文を書いています'], ['finish', 'Googleドキュメントを作成しています']]\n      : [['free', '無料エリアを書いています'], ['paid', '有料エリアを書いています'], ['finish', 'Googleドキュメントを作成しています']];\n    $('progress').innerHTML = steps.map(function (s, i) { return '<li id=\"p' + i + '\">' + s[1] + '</li>'; }).join('');\n    show('done', false);\n    setStep(3);\n    busy(true, '1〜3分ほどかかります。画面を閉じずにお待ちください。');\n\n    var out = {};\n    var chain = Promise.resolve();\n    steps.forEach(function (s, i) {\n      chain = chain.then(function () {\n        $('p' + i).className = 'now';\n        if (s[0] === 'finish') {\n          return call('articleFinish', {\n            row: state.row, title: $('title').value, type: type, price: $('finalPrice').value,\n            plan: state.plan, freeMd: out.free, paidMd: out.paid || '',\n          }).then(function (res) { out.doc = res; });\n        }\n        return call('articleWriteSection', Object.assign({ section: s[0] }, base)).then(function (md) { out[s[0]] = md; });\n      }).then(function () { $('p' + i).className = 'ok'; $('p' + i).textContent += ' ✓'; });\n    });\n    chain.then(function () {\n      busy(false, '');\n      $('docLink').href = out.doc.docUrl;\n      show('pasteCode', type !== '無料');\n      show('done', true);\n      $('next').textContent = '閉じる';\n      $('next').onclick = function () { google.script.host.close(); };\n      show('back', false);\n    }).catch(function (e) {\n      busy(false);\n      error(e + '\\n\\n「この内容で下書きを作成」をもう一度押すと、最初からやり直せます。');\n      setStep(2);\n    });\n  }\n\n  init();\n</script>\n</body>\n</html>\n";
+const ARTICLE_DIALOG_HTML = "<!DOCTYPE html>\n<html>\n<head>\n<base target=\"_top\">\n<meta charset=\"UTF-8\">\n<style>\n  :root { --ink:#202124; --sub:#5f6368; --line:#dadce0; --bg:#f8f9fa; --accent:#1a73e8; --ok:#188038; --warn:#b3261e; }\n  * { box-sizing: border-box; }\n  body { font-family: \"Hiragino Sans\", \"Noto Sans JP\", Meiryo, sans-serif; color: var(--ink); margin: 0; font-size: 14px; line-height: 1.6; }\n  .wrap { padding: 4px 8px 80px; }\n  .steps { display: flex; gap: 8px; margin-bottom: 16px; }\n  .steps div { flex: 1; padding: 6px 10px; border-radius: 6px; background: var(--bg); color: var(--sub); font-size: 13px; }\n  .steps div.on { background: #e8f0fe; color: var(--accent); font-weight: bold; }\n  h3 { font-size: 15px; margin: 18px 0 6px; }\n  label.hint, .hint { color: var(--sub); font-size: 12px; }\n  textarea, input[type=text], input[type=number], select { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 8px; font-size: 13px; font-family: inherit; }\n  textarea.code { font-family: Consolas, \"Courier New\", monospace; height: 220px; white-space: pre; }\n  textarea.image { height: 90px; }\n  .row { display: flex; gap: 16px; }\n  .row > div { flex: 1; }\n  .types label { display: inline-block; margin: 4px 14px 4px 0; cursor: pointer; }\n  .bar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--line); padding: 10px 16px; display: flex; gap: 10px; align-items: center; }\n  button { border: 0; border-radius: 6px; padding: 9px 18px; font-size: 14px; cursor: pointer; }\n  button.primary { background: var(--accent); color: #fff; }\n  button.ghost { background: var(--bg); color: var(--ink); }\n  button:disabled { opacity: .5; cursor: default; }\n  .status { color: var(--sub); font-size: 13px; }\n  .error { background: #fce8e6; color: var(--warn); padding: 10px 12px; border-radius: 6px; margin: 10px 0; white-space: pre-wrap; }\n  .notice { background: #e6f4ea; color: #0d652d; padding: 10px 12px; border-radius: 6px; margin: 10px 0; font-size: 13px; }\n  .notice code { background: #fff; padding: 0 4px; border-radius: 3px; }\n  .card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 10px 0; }\n  .price { display: flex; align-items: baseline; gap: 12px; }\n  .price .big { font-size: 28px; font-weight: bold; color: var(--accent); }\n  ul { margin: 4px 0; padding-left: 20px; }\n  .hidden { display: none; }\n  .done a { font-size: 15px; font-weight: bold; color: var(--accent); }\n  .progress li.now { color: var(--accent); font-weight: bold; }\n  .progress li.ok { color: var(--ok); }\n</style>\n</head>\n<body>\n<div class=\"wrap\">\n  <div class=\"steps\"><div id=\"s1\" class=\"on\">1. GASを貼る</div><div id=\"s2\">2. 分析・価格診断</div><div id=\"s3\">3. 下書き作成</div></div>\n  <div id=\"err\" class=\"error hidden\"></div>\n  <div id=\"notice\" class=\"notice hidden\"></div>\n\n  <!-- 段階1：入力 -->\n  <section id=\"step1\">\n    <h3>GASのコード</h3>\n    <textarea id=\"code\" class=\"code\" placeholder=\"過去に作ったGASをそのまま貼り付けてください。&#10;フォルダID・メールアドレス・会社名などは、送る前に自動でダミー（YOUR_FOLDER_ID_1 など）に置き換えます。\"></textarea>\n\n    <h3>記事のイメージ <span class=\"hint\">（任意・箇条書きでOK）</span></h3>\n    <textarea id=\"image\" class=\"image\" placeholder=\"例）&#10;・小さな事務所の経理担当向け&#10;・月初の作業が3分→数秒になったことを強調&#10;・初心者でも迷わないよう導入手順を丁寧に\"></textarea>\n\n    <div class=\"row\">\n      <div>\n        <h3>記事の種別</h3>\n        <div class=\"types\" id=\"types\"></div>\n      </div>\n      <div>\n        <h3>価格 <span class=\"hint\">（空欄ならAIが提案）</span></h3>\n        <input type=\"text\" id=\"price\" placeholder=\"例）1980\">\n        <div class=\"hint\">決めている価格を入れると、妥当かどうかも診断します。</div>\n      </div>\n    </div>\n  </section>\n\n  <!-- 段階2：分析結果 -->\n  <section id=\"step2\" class=\"hidden\">\n    <div class=\"card\">\n      <h3 style=\"margin-top:0\">このGASの仕組み</h3>\n      <div id=\"summary\"></div>\n      <div class=\"hint\" style=\"margin-top:6px\">処理の流れ</div>\n      <ul id=\"flow\"></ul>\n      <div class=\"hint\">使う前に必要な準備</div>\n      <ul id=\"setup\"></ul>\n    </div>\n\n    <div class=\"card\">\n      <h3 style=\"margin-top:0\">価格診断</h3>\n      <div class=\"price\"><span class=\"big\" id=\"recPrice\"></span><span id=\"range\" class=\"hint\"></span></div>\n      <div id=\"assessment\" style=\"margin:4px 0\"></div>\n      <div class=\"hint\">理由</div>\n      <ul id=\"reasons\"></ul>\n      <div class=\"hint\">もっと高く売るための工夫</div>\n      <ul id=\"valueUp\"></ul>\n      <div class=\"hint\">おすすめの種別：<b id=\"recType\"></b>　<span id=\"typeReason\"></span></div>\n    </div>\n\n    <div class=\"card\">\n      <h3 style=\"margin-top:0\">この内容で作る（自由に変更できます）</h3>\n      <div class=\"hint\">タイトル</div>\n      <select id=\"titleSelect\"></select>\n      <input type=\"text\" id=\"title\" style=\"margin-top:6px\">\n      <div class=\"row\" style=\"margin-top:8px\">\n        <div><div class=\"hint\">種別</div><select id=\"finalType\"></select></div>\n        <div id=\"finalPriceBox\"><div class=\"hint\">価格（円）</div><input type=\"number\" id=\"finalPrice\" min=\"0\" step=\"10\"></div>\n      </div>\n      <div class=\"hint\" style=\"margin-top:8px\">記事のイメージ（追記すると下書きに反映）</div>\n      <textarea id=\"image2\" class=\"image\"></textarea>\n      <div class=\"hint\" style=\"margin-top:6px\">想定読者：<span id=\"reader\"></span></div>\n    </div>\n  </section>\n\n  <!-- 段階3：下書き作成 -->\n  <section id=\"step3\" class=\"hidden\">\n    <h3>下書きを作成しています</h3>\n    <ol class=\"progress\" id=\"progress\"></ol>\n    <div id=\"done\" class=\"done hidden card\">\n      <div>下書きができました👇</div>\n      <a id=\"docLink\" href=\"#\" target=\"_blank\">Googleドキュメントを開く</a>\n      <ol style=\"margin-top:10px\">\n        <li>【要確認】の箇所を埋めて推敲する</li>\n        <li id=\"pasteCode\">【ここに完全版コードを貼る】に完全版のコードを貼る</li>\n        <li>noteに貼り付け、公開設定で種別と価格を入れて公開する</li>\n        <li>公開後は毎朝の自動処理（またはメニュー「noteの新着記事を取り込む」）でURLが紐づき、X投稿案も作られます</li>\n      </ol>\n    </div>\n  </section>\n</div>\n\n<div class=\"bar\">\n  <button class=\"ghost hidden\" id=\"back\" onclick=\"backToInput()\">← 入力に戻る</button>\n  <button class=\"primary\" id=\"next\" onclick=\"analyze()\">仕組みを分析して価格を診断</button>\n  <span class=\"status\" id=\"status\"></span>\n</div>\n\n<script>\n  var state = { row: null, plan: null };\n  var TYPES = [];\n\n  function $(id) { return document.getElementById(id); }\n  function show(id, on) { $(id).classList.toggle('hidden', !on); }\n  function esc(s) { return String(s == null ? '' : s).replace(/[&<>\"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;' }[c]; }); }\n  function yen(n) { return (n === '' || n == null) ? '未定' : String(n).replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',') + '円'; }\n  function list(id, items) { $(id).innerHTML = (items || []).map(function (t) { return '<li>' + esc(t) + '</li>'; }).join(''); }\n  function setStep(n) { [1, 2, 3].forEach(function (i) { $('s' + i).classList.toggle('on', i === n); show('step' + i, i === n); }); }\n  function busy(on, msg) { $('next').disabled = on; $('back').disabled = on; $('status').textContent = msg || ''; }\n  function error(msg) { $('err').textContent = msg; show('err', !!msg); }\n  function selectedType() { var r = document.querySelector('input[name=type]:checked'); return r ? r.value : 'おまかせ'; }\n  function call(fn, arg) {\n    return new Promise(function (resolve, reject) {\n      google.script.run.withSuccessHandler(resolve).withFailureHandler(function (e) { reject(e && e.message ? e.message : String(e)); })[fn](arg);\n    });\n  }\n\n  function init() {\n    busy(true, '読み込み中…');\n    call('articleDialogInit').then(function (res) {\n      TYPES = res.types;\n      $('types').innerHTML = ['おまかせ'].concat(TYPES).map(function (t, i) {\n        return '<label><input type=\"radio\" name=\"type\" value=\"' + esc(t) + '\"' + (i === 0 ? ' checked' : '') + '> ' + esc(t) + '</label>';\n      }).join('');\n      $('finalType').innerHTML = TYPES.map(function (t) { return '<option>' + esc(t) + '</option>'; }).join('');\n      if (!res.hasApiKey) error('APIキーが未設定です。画面を閉じて、メニュー「② APIキーを設定」を先に実行してください。');\n      if (res.prefill) {\n        state.row = res.prefill.row;\n        $('code').value = res.prefill.code;\n        $('image').value = res.prefill.image;\n        $('price').value = res.prefill.price;\n        var r = document.querySelector('input[name=type][value=\"' + res.prefill.type + '\"]');\n        if (r) r.checked = true;\n        if (res.prefill.plan) { state.plan = res.prefill.plan; showPlan(); }\n      }\n      busy(false);\n    }).catch(function (e) { busy(false); error(e); });\n  }\n\n  function analyze() {\n    error('');\n    show('notice', false);\n    busy(true, '仕組みを読み解いています…（30秒ほど）');\n    call('articleAnalyze', {\n      row: state.row, code: $('code').value, image: $('image').value, type: selectedType(), price: $('price').value,\n    }).then(function (res) {\n      busy(false);\n      state.row = res.row;\n      // フォルダID・メールアドレス・会社名などはサーバー側でダミーに置き換え済み。画面の入力欄も置き換え後にそろえる\n      $('code').value = res.code;\n      $('image').value = res.image;\n      if (res.replacements && res.replacements.length) {\n        $('notice').innerHTML = '<b>次の情報をダミーに置き換えてから送りました（シートにも置き換え後だけを保存）。</b><ul>' +\n          res.replacements.map(function (r) { return '<li>' + esc(r.label) + '：' + esc(r.before) + ' → <code>' + esc(r.after) + '</code></li>'; }).join('') +\n          '</ul>記事に載るコードもこのダミーになります。人名など、形の決まっていない情報は自動では見つけられないので、目でも確認してください。';\n        show('notice', true);\n      }\n      state.plan = res.plan;\n      showPlan();\n    }).catch(function (e) { busy(false); error(e); });\n  }\n\n  function showPlan() {\n    var p = state.plan;\n    $('summary').textContent = p.mechanism_summary;\n    list('flow', p.flow);\n    list('setup', p.required_setup);\n    $('recPrice').textContent = yen(p.price.recommended);\n    $('range').textContent = '（目安 ' + yen(p.price.low) + '〜' + yen(p.price.high) + '）';\n    $('assessment').textContent = p.price.assessment || '';\n    list('reasons', p.price.reasons);\n    list('valueUp', p.price.value_up_ideas);\n    $('recType').textContent = p.recommended_type;\n    $('typeReason').textContent = p.type_reason;\n    $('reader').textContent = p.target_reader;\n\n    var titles = [p.title].concat(p.title_alternatives || []);\n    $('titleSelect').innerHTML = titles.map(function (t) { return '<option>' + esc(t) + '</option>'; }).join('');\n    $('titleSelect').onchange = function () { $('title').value = this.value; };\n    $('title').value = p.title;\n\n    var chosen = selectedType();\n    $('finalType').value = chosen === 'おまかせ' ? p.recommended_type : chosen;\n    var userPrice = $('price').value.replace(/[^\\d０-９]/g, '');\n    $('finalPrice').value = userPrice ? Number(userPrice.replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })) : p.price.recommended;\n    $('finalType').onchange = togglePrice;\n    togglePrice();\n    $('image2').value = $('image').value;\n\n    setStep(2);\n    show('back', true);\n    $('next').textContent = 'この内容で下書きを作成';\n    $('next').onclick = writeDraft;\n  }\n\n  function togglePrice() { show('finalPriceBox', $('finalType').value !== '無料'); }\n\n  function backToInput() {\n    error('');\n    setStep(1);\n    show('back', false);\n    $('next').textContent = '仕組みを分析して価格を診断';\n    $('next').onclick = analyze;\n  }\n\n  function writeDraft() {\n    error('');\n    var type = $('finalType').value;\n    var base = { code: $('code').value, image: $('image2').value, type: type, price: $('finalPrice').value, plan: state.plan };\n    var steps = type === '無料'\n      ? [['free', '本文を書いています'], ['finish', 'Googleドキュメントを作成しています']]\n      : [['free', '無料エリアを書いています'], ['paid', '有料エリアを書いています'], ['finish', 'Googleドキュメントを作成しています']];\n    $('progress').innerHTML = steps.map(function (s, i) { return '<li id=\"p' + i + '\">' + s[1] + '</li>'; }).join('');\n    show('done', false);\n    setStep(3);\n    busy(true, '1〜3分ほどかかります。画面を閉じずにお待ちください。');\n\n    var out = {};\n    var chain = Promise.resolve();\n    steps.forEach(function (s, i) {\n      chain = chain.then(function () {\n        $('p' + i).className = 'now';\n        if (s[0] === 'finish') {\n          return call('articleFinish', {\n            row: state.row, title: $('title').value, type: type, price: $('finalPrice').value,\n            plan: state.plan, freeMd: out.free, paidMd: out.paid || '',\n          }).then(function (res) { out.doc = res; });\n        }\n        return call('articleWriteSection', Object.assign({ section: s[0] }, base)).then(function (md) { out[s[0]] = md; });\n      }).then(function () { $('p' + i).className = 'ok'; $('p' + i).textContent += ' ✓'; });\n    });\n    chain.then(function () {\n      busy(false, '');\n      $('docLink').href = out.doc.docUrl;\n      show('pasteCode', type !== '無料');\n      show('done', true);\n      $('next').textContent = '閉じる';\n      $('next').onclick = function () { google.script.host.close(); };\n      show('back', false);\n    }).catch(function (e) {\n      busy(false);\n      error(e + '\\n\\n「この内容で下書きを作成」をもう一度押すと、最初からやり直せます。');\n      setStep(2);\n    });\n  }\n\n  init();\n</script>\n</body>\n</html>\n";

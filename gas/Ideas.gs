@@ -65,19 +65,21 @@ function articleAnalyze(input) {
     throw new Error(`コードが長すぎます（${idea.code.length}字）。記事にしたい部分だけ、${APP.MAX_CODE_CHARS}字以内で貼ってください。`);
   }
 
+  // フォルダID・メールアドレス・会社名などは、送る前にダミーへ置き換える（シートにも置き換え後の内容だけを残す）
+  const maskedCode = maskSensitive_(idea.code);
+  const maskedImage = maskSensitive_(idea.image);
+  idea.code = maskedCode.text;
+  idea.image = maskedImage.text;
+  const replacements = maskedCode.replacements.concat(maskedImage.replacements);
+
   const ideas = ensureIdeasSheet_();
   const row = saveIdeaRow_(ideas, input.row, {
     '記事のイメージ': idea.image,
     'コード': idea.code,
     '種別': idea.type === 'おまかせ' ? '' : idea.type,
     '価格': idea.price,
+    'チェック': describeReplacements_(replacements),
   });
-
-  const sensitive = findSensitive_(idea.code + '\n' + idea.image);
-  if (sensitive.length) {
-    saveIdeaRow_(ideas, row, { 'チェック': describeSensitive_(sensitive) });
-    return { row: row, sensitive: sensitive };
-  }
 
   const settings = getSettings_();
   const plan = callClaudeJson_({
@@ -88,8 +90,8 @@ function articleAnalyze(input) {
     schema: buildArticleAnalyzeSchema_(),
     maxTokens: 12000,
   });
-  saveIdeaRow_(ideas, row, { 'チェック': 'OK', 'ステータス': '分析済', '分析結果': JSON.stringify(plan) });
-  return { row: row, plan: plan };
+  saveIdeaRow_(ideas, row, { 'ステータス': '分析済', '分析結果': JSON.stringify(plan) });
+  return { row: row, plan: plan, code: idea.code, image: idea.image, replacements: replacements };
 }
 
 /**
@@ -97,10 +99,13 @@ function articleAnalyze(input) {
  * @param {{section: 'free'|'paid', code: string, image: string, type: string, price: number, plan: Object}} input
  */
 function articleWriteSection(input) {
-  const idea = { code: input.code, image: input.image, type: input.type, price: normalizePrice_(input.price) };
-  // 書く前にもう一度チェック（画面でコードを書き換えた場合に備える）
-  const sensitive = findSensitive_(idea.code + '\n' + idea.image);
-  if (sensitive.length) throw new Error(describeSensitive_(sensitive));
+  // 画面でコードやイメージを書き換えた場合に備えて、書く前にもう一度置き換える
+  const idea = {
+    code: maskSensitive_(input.code).text,
+    image: maskSensitive_(input.image).text,
+    type: input.type,
+    price: normalizePrice_(input.price),
+  };
 
   const settings = getSettings_();
   const prompt = input.section === 'paid'
@@ -127,6 +132,7 @@ function articleFinish(input) {
     titleAlternatives: (input.plan.title_alternatives || []).filter(t => t !== input.title),
     type: input.type,
     price: input.type === '無料' ? '' : normalizePrice_(input.price),
+    support: getSettings_()['サポート方針（有料記事）'],
   };
   const docUrl = createDraftDoc_(`【下書き】${meta.title}`, assembleDraftMarkdown_(meta, input.freeMd, input.paidMd));
   const articleId = registerDraftArticle_(meta, input.freeMd, docUrl);
