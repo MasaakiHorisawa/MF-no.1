@@ -168,3 +168,22 @@ test('送信前チェック：マイナンバー・口座番号・郵便番号�
   ['口座番号', '郵便番号', '住所', 'マイナンバー・法人番号'].forEach(l => assert.ok(labels.includes(l), l + ': ' + labels.join(',')));
   assert.strictEqual(findSensitive_("const d = new Date(1700000000000.5); const zip = '123-4567'; const pref = '〇〇県〇〇市';").length, 0);
 });
+
+test('完全版コードを目印の位置に差し込む（目印がなければ最後に追加）', () => {
+  const code = "function main() {\n  DriveApp.getFolderById('YOUR_ID_1');\n}";
+  const paid = '## 導入手順\n1. 貼る\n\n## 完全版コード\n【ここに完全版コードを貼る】\n\n## よくあるエラー\n- 権限';
+  const out = insertFullCode_(paid, code, '完全版コード');
+  assert.doesNotMatch(out, /【ここに/);
+  assert.match(out, /## 完全版コード\n\n> コード内の「YOUR_〜」[^\n]*\n\n```javascript\nfunction main\(\) \{\n  DriveApp\.getFolderById\('YOUR_ID_1'\);\n\}\n```\n\n\n## よくあるエラー/);
+
+  const twice = insertFullCode_('A【ここにコード全文を貼る】B【ここに完全版コードを貼る】C', 'x()', 'コード全文');
+  assert.strictEqual((twice.match(/```javascript/g) || []).length, 1);
+  assert.doesNotMatch(twice, /【ここに/);
+  assert.doesNotMatch(twice, /YOUR_〜/); // ダミーがなければ置き換えの注意書きは付けない
+
+  const appended = insertFullCode_('## 導入手順\n本文', 'x()', '完全版コード');
+  assert.match(appended, /本文\n\n## 完全版コード\n\n```javascript\nx\(\)\n```\n$/);
+
+  const html = markdownToHtml_(out);
+  assert.match(html, /<pre[^>]*>function main\(\) \{\n  DriveApp\.getFolderById\(&#39;YOUR_ID_1&#39;\);|<pre[^>]*>function main\(\) \{\n  DriveApp\.getFolderById\('YOUR_ID_1'\);/);
+});

@@ -111,7 +111,7 @@
       <a id="docLink" href="#" target="_blank">Googleドキュメントを開く</a>
       <ol style="margin-top:10px">
         <li>【要確認】の箇所を埋めて推敲する</li>
-        <li id="pasteCode">【ここに完全版コードを貼る】に完全版のコードを貼る</li>
+        <li>コードは自動で差し込み済みです。「YOUR_〜」などのダミーが記事に合っているか確認する</li>
         <li>noteに貼り付け、公開設定で種別と価格を入れて公開する</li>
         <li>公開後は毎朝の自動処理（またはメニュー「noteの新着記事を取り込む」）でURLが紐づき、X投稿案も作られます</li>
       </ol>
@@ -252,7 +252,7 @@
         if (s[0] === 'finish') {
           return call('articleFinish', {
             row: state.row, title: $('title').value, type: type, price: $('finalPrice').value,
-            plan: state.plan, freeMd: out.free, paidMd: out.paid || '',
+            plan: state.plan, code: $('code').value, freeMd: out.free, paidMd: out.paid || '',
           }).then(function (res) { out.doc = res; });
         }
         return call('articleWriteSection', Object.assign({ section: s[0] }, base)).then(function (md) { out[s[0]] = md; });
@@ -261,7 +261,6 @@
     chain.then(function () {
       busy(false, '');
       $('docLink').href = out.doc.docUrl;
-      show('pasteCode', type !== '無料');
       show('done', true);
       $('next').textContent = '閉じる';
       $('next').onclick = function () { google.script.host.close(); };

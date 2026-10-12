@@ -124,7 +124,7 @@ function articleWriteSection(input) {
 
 /**
  * 段階3：Googleドキュメントを作り、「記事」「ネタ帳」シートに記録する
- * @param {{row: number, title: string, type: string, price: number, plan: Object, freeMd: string, paidMd: string}} input
+ * @param {{row: number, title: string, type: string, price: number, plan: Object, code: string, freeMd: string, paidMd: string}} input
  */
 function articleFinish(input) {
   const meta = {
@@ -134,7 +134,15 @@ function articleFinish(input) {
     price: input.type === '無料' ? '' : normalizePrice_(input.price),
     support: getSettings_()['サポート方針（有料記事）'],
   };
-  const docUrl = createDraftDoc_(`【下書き】${meta.title}`, assembleDraftMarkdown_(meta, input.freeMd, input.paidMd));
+  // 完全版コードは手元のコードをそのまま差し込む（無料記事は本文、有料記事は有料エリアに入れる）
+  const code = maskSensitive_(input.code || '').text;
+  let freeMd = input.freeMd;
+  let paidMd = input.paidMd;
+  if (code) {
+    if (meta.type === '無料') freeMd = insertFullCode_(freeMd, code, 'コード全文');
+    else paidMd = insertFullCode_(paidMd || '', code, '完全版コード');
+  }
+  const docUrl = createDraftDoc_(`【下書き】${meta.title}`, assembleDraftMarkdown_(meta, freeMd, paidMd));
   const articleId = registerDraftArticle_(meta, input.freeMd, docUrl);
   saveIdeaRow_(ensureIdeasSheet_(), input.row, {
     '種別': meta.type,

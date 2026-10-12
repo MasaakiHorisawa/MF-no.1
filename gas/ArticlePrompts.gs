@@ -158,7 +158,7 @@ function buildMarkdownSchema_() {
 /** 下書きドキュメントの本文を組み立てる（無料記事は有料エリアなし） */
 function assembleDraftMarkdown_(meta, freeMd, paidMd) {
   const header = [
-    '> 【下書き】AIが作成しました。【要確認】の箇所を埋め、内容を確認してから公開してください。',
+    '> 【下書き】AIが作成しました。【要確認】の箇所を埋め、内容を確認してから公開してください。コードは貼り付けたもの（ダミー置き換え済み）を自動で差し込んでいます。',
     `> 種別：${meta.type}` + (meta.type === '無料' ? '' : ` ／ 価格：${formatYen_(meta.price)}（noteの公開設定で入力）`),
     `> タイトル案：${[meta.title].concat(meta.titleAlternatives || []).join(' ／ ')}`,
     '',
@@ -172,6 +172,31 @@ function assembleDraftMarkdown_(meta, freeMd, paidMd) {
     if (meta.support) header.push('', '## サポートについて', '', String(meta.support).trim());
   }
   return header.join('\n');
+}
+
+const FULL_CODE_MARKERS = ['【ここに完全版コードを貼る】', '【ここにコード全文を貼る】'];
+
+/**
+ * 本文の【ここに完全版コードを貼る】を、実際のコード（ダミー置き換え済み）に差し替える
+ * AIに書き写させると長くて時間切れになり、書き間違いも起きるため、手元のコードをそのまま入れる。
+ * 目印が見つからなければ、最後に「完全版コード」の見出しを付けて追加する
+ */
+function insertFullCode_(markdown, code, heading) {
+  const placeholderNote = /YOUR_|user\d+@example\.com|サンプル/.test(code)
+    ? '\n> コード内の「YOUR_〜」「user1@example.com」「サンプル株式会社」などは、ご自身の環境の値に置き換えてください。\n'
+    : '';
+  const block = `${placeholderNote}\n\`\`\`javascript\n${String(code).trim()}\n\`\`\`\n`;
+  let text = String(markdown);
+  let inserted = false;
+  FULL_CODE_MARKERS.forEach(marker => {
+    text = text.split(marker).map((part, i) => {
+      if (i === 0) return part;
+      if (inserted) return part; // 2か所以上あれば、2つ目以降の目印は消すだけ
+      inserted = true;
+      return block + part;
+    }).join('');
+  });
+  return inserted ? text : `${text.trim()}\n\n## ${heading}\n${block}`;
 }
 
 /** 「1,980円」「１９８０」などを数値に。読めなければ空文字 */
