@@ -25,11 +25,16 @@ function importNoteArticles() {
  * @return {{added: string[], linked: string[], postsCreated: number, errors: string[]}}
  */
 function importNoteArticles_(settings) {
-  const res = UrlFetchApp.fetch(settings['noteのRSS'], { muteHttpExceptions: true });
+  const rssUrl = resolveNoteRssUrl_(settings['noteのRSS']);
+  const res = UrlFetchApp.fetch(rssUrl, { muteHttpExceptions: true });
   if (res.getResponseCode() !== 200) {
     throw new Error(`noteのRSSを読み込めませんでした（HTTP ${res.getResponseCode()}）。「設定」シートのURLを確認してください。`);
   }
-  const items = parseRssItems_(res.getContentText());
+  const text = res.getContentText();
+  if (!/<rss[\s>]/.test(text)) {
+    throw new Error(`${rssUrl} はRSSではないようです。「設定」シートの「noteのRSS」を https://note.com/あなたのID/rss の形にしてください。`);
+  }
+  const items = parseRssItems_(text);
 
   const articles = getSheetOrThrow_(APP.SHEETS.ARTICLES);
   const cols = requireColumns_(articles, ARTICLE_COLS);
@@ -86,9 +91,15 @@ function importNoteArticles_(settings) {
   return result;
 }
 
+/** プロフィールURL（https://note.com/ID）が入っていても、RSSのURL（…/rss）に直す */
+function resolveNoteRssUrl_(url) {
+  const trimmed = String(url || '').trim().replace(/[?#].*$/, '').replace(/\/+$/, '');
+  return /^https:\/\/note\.com\/[^/]+$/.test(trimmed) ? `${trimmed}/rss` : trimmed;
+}
+
 /** RSS（XML）から記事の一覧を取り出す */
 function parseRssItems_(xml) {
-  const channel = XmlService.parse(xml).getRootElement().getChild('channel');
+  const channel = XmlService.parse(escapeBareAmpersands_(xml)).getRootElement().getChild('channel');
   if (!channel) return [];
   return channel.getChildren('item').map(item => ({
     title: (item.getChildText('title') || '').trim(),
@@ -96,6 +107,14 @@ function parseRssItems_(xml) {
     date: item.getChildText('pubDate') ? new Date(item.getChildText('pubDate')) : '',
     summary: htmlToPlainText_(item.getChildText('description') || ''),
   })).filter(i => i.title && i.url);
+}
+
+/**
+ * note の RSS には、画像URLの「?fit=bounds&format=jpeg」のように & がそのまま入っていることがあり、
+ * GAS の XmlService はそれをエラーにする。正しい記号（&amp; など）以外の & を &amp; に直してから読む
+ */
+function escapeBareAmpersands_(xml) {
+  return String(xml).replace(/&(?!(?:[A-Za-z][A-Za-z0-9]*|#\d+|#x[0-9A-Fa-f]+);)/g, '&amp;');
 }
 
 function htmlToPlainText_(html) {

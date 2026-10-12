@@ -116,3 +116,16 @@ test('RSS の本文冒頭をテキストにし、URLとタイトルの表記ゆ�
   assert.strictEqual(normalizeNoteUrl_('https://note.com/a/n/n123/?from=rss'), 'https://note.com/a/n/n123');
   assert.strictEqual(normalizeTitle_('毎月の現金出納帳、ＧＡＳ 配布'), normalizeTitle_('毎月の現金出納帳、GAS配布'));
 });
+
+test('RSS の裸の & を直し、正しい記号はそのまま残す', () => {
+  const xml = '<url>https://a.jp/x.jpg?fit=bounds&format=jpeg&quality=85</url><t>A &amp; B &lt;p&gt; &#39; &#x27;</t>';
+  assert.strictEqual(escapeBareAmpersands_(xml),
+    '<url>https://a.jp/x.jpg?fit=bounds&amp;format=jpeg&amp;quality=85</url><t>A &amp; B &lt;p&gt; &#39; &#x27;</t>');
+});
+
+test('noteのプロフィールURLをRSSのURLに直す', () => {
+  assert.strictEqual(resolveNoteRssUrl_('https://note.com/nice_macaw6'), 'https://note.com/nice_macaw6/rss');
+  assert.strictEqual(resolveNoteRssUrl_(' https://note.com/nice_macaw6/ '), 'https://note.com/nice_macaw6/rss');
+  assert.strictEqual(resolveNoteRssUrl_('https://note.com/nice_macaw6/rss'), 'https://note.com/nice_macaw6/rss');
+  assert.strictEqual(resolveNoteRssUrl_('https://note.com/nice_macaw6?tab=x'), 'https://note.com/nice_macaw6/rss');
+});
