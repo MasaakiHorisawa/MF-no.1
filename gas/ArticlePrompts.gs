@@ -31,6 +31,7 @@ function buildArticleSystemPrompt_(settings) {
     '- 個別の税務相談に応じる表現や、税額・節税効果を断定する表現は使わない。発信者は税理士ではない。',
     '- 顧問先・勤務先を特定できる情報は書かない。例に出す会社名は「サンプル株式会社」などにする。',
     '- 誇張や、不安をあおる表現は使わない。',
+    PromptGuard.SYSTEM_NOTE.split('\n').map(l => `- ${l}`).join('\n'),
     '- 本文は Markdown で書く（見出し「## 」「### 」、箇条書き「- 」、手順「1. 」、コードは ``` で囲む）。',
     '',
     '## 記事の型',
@@ -55,9 +56,7 @@ function buildIdeaBlock_(idea) {
     idea.image || '（なし）',
     '',
     '## コード',
-    '```javascript',
-    idea.code,
-    '```',
+    PromptGuard.wrap(['```javascript', idea.code, '```'].join('\n')),
   ].join('\n');
 }
 

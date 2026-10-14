@@ -10,7 +10,7 @@ const vm = require('vm');
 
 // 読みやすさのための並び順（GAS はファイル順に依存しないが、設定 → 共通処理 → 機能 の順に並べる）
 const ORDER = [
-  'Config', 'Sheets', 'Menu', 'Claude', 'Prompts', 'ArticlePrompts', 'Checks', 'Sanitize',
+  'Config', 'Sheets', 'Menu', 'Claude', 'Prompts', 'ArticlePrompts', 'Checks', 'PromptGuard', 'Sanitize',
   'Docs', 'Posts', 'Ideas', 'Rss', 'Reminder',
 ];
 

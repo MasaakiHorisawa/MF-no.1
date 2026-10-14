@@ -26,6 +26,7 @@ function buildSystemPrompt_(settings) {
     '- 「絶対」「必ず」などの誇張や、不安をあおる表現は使わない。',
     '- リンク付きの告知は多くても1本にする。ほかの投稿は、記事を読まなくても役に立つ内容（手順のコツ、よくある失敗、問いかけなど）にする。',
     '- 投稿どうしで切り口と書き出しを変える。',
+    PromptGuard.SYSTEM_NOTE.split('\n').map(l => `- ${l}`).join('\n'),
     '',
     '## 分類',
     `pillar（発信の柱）：${PILLARS.join(' / ')}`,
@@ -43,7 +44,7 @@ function buildUserPrompt_(article, count) {
     `リンク：${article.url ? 'あり' : 'なし（include_link は false にする）'}`,
     '',
     '## 記事の本文・要点',
-    article.body,
+    PromptGuard.wrap(article.body),
   ].join('\n');
 }
 

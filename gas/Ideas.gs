@@ -72,16 +72,19 @@ function articleAnalyze(input) {
   idea.image = maskedImage.text;
   const replacements = maskedCode.replacements.concat(maskedImage.replacements);
 
+  const settings = getSettings_();
+  const injection = guardPromptInput_(idea.code, '貼り付けたコード', settings);
+
   const ideas = ensureIdeasSheet_();
   const row = saveIdeaRow_(ideas, input.row, {
     '記事のイメージ': idea.image,
     'コード': idea.code,
     '種別': idea.type === 'おまかせ' ? '' : idea.type,
     '価格': idea.price,
-    'チェック': describeReplacements_(replacements),
+    'チェック': [describeReplacements_(replacements), injection.risk === 'none' ? '' : PromptGuard.describe(injection)]
+      .filter(Boolean).join(' / '),
   });
 
-  const settings = getSettings_();
   const plan = callClaudeJson_({
     model: settings['モデル'],
     effort: settings['effort（記事）'] || 'low',
@@ -108,6 +111,7 @@ function articleWriteSection(input) {
   };
 
   const settings = getSettings_();
+  guardPromptInput_(idea.code, '貼り付けたコード', settings);
   const prompt = input.section === 'paid'
     ? buildArticlePaidPrompt_(idea, input.plan)
     : buildArticleFreePrompt_(idea, input.plan, input.type);

@@ -18,6 +18,7 @@ const source = fs.readdirSync(gasDir)
 
 const context = {
   console,
+  Buffer, // PromptGuard の base64 復号で使う（GAS では Utilities を使う）
   sleeps: [],
   fetchQueue: [],
   fetchCalls: [],

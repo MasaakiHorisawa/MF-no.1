@@ -92,3 +92,15 @@ function describeReplacements_(replacements) {
 function truncate_(text) {
   return text.length > 40 ? `${text.slice(0, 40)}…` : text;
 }
+
+/**
+ * 送信前チェック：AI への指示を書き換える文（プロンプトインジェクション）が紛れていないか調べる
+ * 判定そのものは PromptGuard.gs（ほかのシステムにも持っていける単体モジュール）で行い、ここでは「設定」シートに合わせて止めるかを決める
+ * @return {Object} PromptGuard.scan の結果（止めたときはエラーを投げる）
+ */
+function guardPromptInput_(text, where, settings) {
+  const mode = { '中程度から止める': 'medium', '止めない': 'never' }[String(settings['インジェクション検出'] || '').trim()] || 'high';
+  const result = PromptGuard.guard(text, { where: where, block: mode });
+  if (result.risk !== 'none') console.log(`${where}：${PromptGuard.describe(result)}`);
+  return result;
+}

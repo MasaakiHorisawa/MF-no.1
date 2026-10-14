@@ -58,6 +58,8 @@ function generatePostsForArticleRow_(articles, row, settings) {
     body: String(values[aCols['本文・要点']] || '').trim(),
   };
   if (!article.title || !article.body) throw new Error('タイトルと「本文・要点」を入力してください');
+  // RSS で取り込んだ本文も入るので、AI に送る前に調べる
+  guardPromptInput_(`${article.title}\n${article.body}`, `記事「${article.title}」`, settings);
   if (!article.id) {
     article.id = nextArticleId_(articles);
     articles.getRange(row, aCols['記事ID'] + 1).setValue(article.id);
